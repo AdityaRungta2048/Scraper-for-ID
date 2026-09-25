@@ -5,4 +5,4 @@ generation changes in a way that could alter a decision. Cached resolutions are 
 by this version, so a bump automatically invalidates them.
 """
 
-MATCHING_ENGINE_VERSION = "1.0.0"
+MATCHING_ENGINE_VERSION = "1.0.1"

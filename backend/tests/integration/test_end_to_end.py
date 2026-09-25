@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.models import JobStatus, MatchDecision, ProcessingJob, ProcessingRow
 from app.services.jobs import create_job, start_job
+from app.version import MATCHING_ENGINE_VERSION
 from app.workers.processor import process_job
 from tests.excel_helpers import KICK_HEADERS, TWITCH_HEADERS, make_workbook
 from tests.scenarios import Expect, build_kick_world, build_twitch_world
@@ -77,7 +78,9 @@ async def test_kick_source_workbook_end_to_end(fake, sf, tmp_path):
     # every automatic decision is explainable and versioned
     with sf() as s:
         decisions = list(s.execute(select(MatchDecision)).scalars())
-    assert decisions and all(d.matching_engine_version == "1.0.0" and d.reason for d in decisions)
+    assert decisions and all(
+        d.matching_engine_version == MATCHING_ENGINE_VERSION and d.reason for d in decisions
+    )
     match_row = rows[2]
     best = next(c for c in match_row.evidence_json["candidates"] if c["username"] == "starwraith")
     assert best["evidence"]["profile_image_similarity"] >= 0.9 and best["reason"]

@@ -198,11 +198,15 @@ async def test_403_is_auth_error_and_400_not_retried(world):
     with pytest.raises(AuthenticationError):
         await tw.find_exact_accounts(["a1"])
     world.fail(is_users, status=400, times=1)
-    tw, _, _, _ = make(world)
+    _, _, th, _ = make(world)
     n = world.calls["api.twitch.tv/helix/users"]
-    with pytest.raises(BadRequestError):
-        await tw.find_exact_accounts(["a2"])
+    with pytest.raises(BadRequestError):  # the HTTP client never retries a 400 itself
+        await th.get_json("users", params=[("login", "a2")])
     assert world.calls["api.twitch.tv/helix/users"] == n + 1
+    # ...but a one-off 400 for a valid login is re-checked, never turned into "not found"
+    world.fail(is_users, status=400, times=1)
+    tw, _, _, _ = make(world)
+    assert (await tw.find_exact_accounts(["nikklive_"]))["nikklive_"] is not None
 
 
 async def test_404_on_lookup_endpoint_is_not_treated_as_missing_account(world):
@@ -241,3 +245,38 @@ async def test_token_bucket_throttles():
     for _ in range(4):
         await bucket.acquire(sleep)
     assert sum(waited) >= 1.9  # 60/min -> ~1s per request after the burst
+
+
+# --- regression: one invalid login must not fail the whole batch (real Helix returns 400) ---
+async def test_invalid_login_in_batch_is_isolated_not_fatal(world):
+    tw, _, _, _ = make(world)
+    res = await tw.find_exact_accounts(["nikklive_", "_trsnils", "abc", "ghost_user"])
+    assert res["nikklive_"] is not None  # the valid account is still found
+    assert res["_trsnils"] is None and res["abc"] is None and res["ghost_user"] is None
+
+
+def test_twitch_variants_follow_username_rules():
+    tw, _, _, _ = make(FakePlatforms())
+    assert tw.to_handle("_trsnils") is None  # leading underscore
+    assert tw.to_handle("abc") is None  # too short
+    assert tw.to_handle("trsnils_") == "trsnils_"
+    assert tw.to_handle("quentin-cey") == "quentin_cey"
+
+
+async def test_broken_endpoint_is_still_an_error_not_not_found(world):
+    world.fail(is_users, status=400)  # every request rejected: an API problem, not bad logins
+    tw, _, _, _ = make(world)
+    with pytest.raises(BadRequestError):
+        await tw.find_exact_accounts(["nikklive_", "other_user"])
+
+
+async def test_request_pacing_uses_steady_gaps():
+    t = [0.0]
+
+    async def sleep(s: float) -> None:
+        t[0] += s
+
+    bucket = TokenBucket(60, burst=1, clock=lambda: t[0])
+    for _ in range(5):
+        await bucket.acquire(sleep)
+    assert t[0] >= 3.9  # 60/min with burst 1 -> ~1 s between requests

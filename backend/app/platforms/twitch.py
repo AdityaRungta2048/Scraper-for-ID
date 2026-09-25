@@ -14,11 +14,12 @@ from typing import Any
 import httpx
 
 from app.cache.service import CacheService
-from app.platforms.base import PlatformAdapter, Profile, chunked, dedupe
+from app.platforms.base import BatchLookup, PlatformAdapter, Profile, chunked, dedupe
 from app.platforms.errors import UnexpectedResponseError
 from app.platforms.http import PlatformHttpClient, download_image
 
 DEFAULT_AVATAR_MARKERS = ("user-default-pictures",)
+VARIANT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]{3,24}$")
 
 
 class TwitchAdapter(PlatformAdapter):
@@ -51,8 +52,10 @@ class TwitchAdapter(PlatformAdapter):
         return f"https://www.twitch.tv/{handle}"
 
     def to_handle(self, variant: str) -> str | None:
+        # Generated variants must satisfy Twitch's username rules (4-25 chars, no leading "_"):
+        # Helix rejects the whole batch with HTTP 400 if one login is invalid.
         v = variant.strip().lower().replace("-", "_").replace(".", "_").replace(" ", "")
-        return v if self.is_valid_handle(v) else None
+        return v if VARIANT_PATTERN.match(v) else None
 
     async def find_exact_accounts(self, handles: list[str]) -> dict[str, Profile | None]:
         result: dict[str, Profile | None] = {}
@@ -69,13 +72,16 @@ class TwitchAdapter(PlatformAdapter):
             else:
                 result[h] = Profile.from_dict(cached)
 
-        fetched: dict[str, Profile] = {}
-        for batch in chunked(to_fetch, 100):
+        async def fetch(batch: list[str]) -> list[dict[str, Any]]:
             body = await self.http.get_json(
                 "users", params=[("login", h) for h in batch], endpoint_category="helix.users"
             )
-            data = _data(body, "helix/users")
-            for item in data:
+            return _data(body, "helix/users")
+
+        lookup = BatchLookup(fetch, probe_handle="twitch")
+        fetched: dict[str, Profile] = {}
+        for batch in chunked(to_fetch, 100):
+            for item in await lookup.run(batch):
                 login = str(item.get("login", "")).lower()
                 if not login:
                     continue

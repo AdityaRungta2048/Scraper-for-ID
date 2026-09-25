@@ -21,7 +21,7 @@ import httpx
 
 from app.cache.service import CacheService
 from app.logging_setup import get_logger
-from app.platforms.base import PlatformAdapter, Profile, chunked, dedupe
+from app.platforms.base import BatchLookup, PlatformAdapter, Profile, chunked, dedupe
 from app.platforms.errors import UnexpectedResponseError
 from app.platforms.http import PlatformHttpClient, download_image
 
@@ -96,12 +96,16 @@ class KickAdapter(PlatformAdapter):
             else:
                 result[h] = Profile.from_dict(cached)
 
-        fetched: dict[str, Profile] = {}
-        for batch in chunked(to_fetch, 50):
+        async def fetch(batch: list[str]) -> list[dict[str, Any]]:
             body = await self.http.get_json(
                 "channels", params=[("slug", s) for s in batch], endpoint_category="kick.channels"
             )
-            for item in _data(body, "channels"):
+            return _data(body, "channels")
+
+        lookup = BatchLookup(fetch, probe_handle="kick")
+        fetched: dict[str, Profile] = {}
+        for batch in chunked(to_fetch, 50):
+            for item in await lookup.run(batch):
                 slug = str(item.get("slug", "")).lower()
                 if not slug:
                     continue

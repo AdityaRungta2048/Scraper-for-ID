@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -121,3 +122,43 @@ def dedupe(items: list[str]) -> list[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+BatchFetch = Callable[[list[str]], Awaitable[list[dict[str, Any]]]]
+
+
+class BatchLookup:
+    """Batched exact lookups that survive invalid handles.
+
+    Platforms reject a WHOLE batch (HTTP 400) if a single handle is syntactically invalid
+    by their rules. When that happens the batch is split in halves until the offending
+    handle is isolated; that handle is then treated as "no such account". Before ever
+    concluding that, the endpoint is probed once with a known-valid handle, so a genuine
+    API problem still surfaces as an error instead of silently becoming "not found".
+    """
+
+    def __init__(self, fetch: BatchFetch, probe_handle: str) -> None:
+        self.fetch = fetch
+        self.probe_handle = probe_handle
+        self._endpoint_ok = False
+        self.rejected: set[str] = set()
+
+    async def run(self, batch: list[str]) -> list[dict[str, Any]]:
+        from app.platforms.errors import BadRequestError
+
+        try:
+            items = await self.fetch(batch)
+            self._endpoint_ok = True
+            return items
+        except BadRequestError:
+            if len(batch) > 1:
+                mid = len(batch) // 2
+                return [*(await self.run(batch[:mid])), *(await self.run(batch[mid:]))]
+            if not self._endpoint_ok:
+                await self.fetch([self.probe_handle])  # raises again if the endpoint itself is broken
+                self._endpoint_ok = True
+            try:  # re-check once: only a consistent rejection means "invalid handle"
+                return await self.fetch(batch)
+            except BadRequestError:
+                self.rejected.add(batch[0])
+                return []

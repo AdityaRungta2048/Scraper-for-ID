@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import random
+import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ import httpx
 from PIL import Image, ImageDraw
 from rapidfuzz import fuzz
 
+TWITCH_LOGIN_RULE = re.compile(r"^[a-z0-9][a-z0-9_]{3,24}$")
 TWITCH_IMG = "https://static-cdn.jtvnw.net/jtv_user_pictures/{}-profile_image-300x300.png"
 TWITCH_DEFAULT_IMG = "https://static-cdn.jtvnw.net/user-default-pictures-uv/{}-profile_image-300x300.png"
 KICK_IMG = "https://files.kick.com/images/user/{}/profile_image/conversion/{}-fullsize.webp"
@@ -227,6 +229,12 @@ class FakePlatforms:
             logins = [x.lower() for x in q.get("login", [])]
             if len(logins) + len(q.get("id", [])) > 100:
                 return httpx.Response(400, json={"error": "too many"})
+            # Real Helix behaviour: ONE invalid login rejects the whole request.
+            if any(not TWITCH_LOGIN_RULE.match(x) for x in logins):
+                return httpx.Response(
+                    400,
+                    json={"error": "Bad Request", "message": "Invalid login names, emails or IDs in request"},
+                )
             data = [
                 {k: v for k, v in self.twitch[x].items() if not k.startswith("_")}
                 for x in logins

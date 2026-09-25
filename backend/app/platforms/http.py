@@ -166,6 +166,7 @@ class PlatformHttpClient:
         auth_headers: Callable[[str], dict[str, str]] | None = None,
         concurrency: int = 4,
         requests_per_minute: float = 600,
+        burst: int | None = None,
         retry: RetryPolicy | None = None,
         sleep: SleepFn = asyncio.sleep,
     ) -> None:
@@ -175,7 +176,7 @@ class PlatformHttpClient:
         self.token = token
         self.auth_headers = auth_headers or (lambda t: {"Authorization": f"Bearer {t}"})
         self.semaphore = asyncio.Semaphore(max(1, concurrency))
-        self.bucket = TokenBucket(requests_per_minute)
+        self.bucket = TokenBucket(requests_per_minute, burst)
         self.retry = retry or RetryPolicy()
         self.sleep = sleep
         self.request_count = 0

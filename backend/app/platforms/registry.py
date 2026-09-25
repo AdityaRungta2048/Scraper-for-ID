@@ -66,6 +66,7 @@ def build_platforms(
         auth_headers=lambda t: {"Authorization": f"Bearer {t}", "Client-Id": twitch_id},
         concurrency=settings.api_concurrency,
         requests_per_minute=settings.twitch_requests_per_minute,
+        burst=settings.request_burst,
         retry=retry,
     )
     kick_token = ClientCredentialsToken(
@@ -82,6 +83,7 @@ def build_platforms(
         token=kick_token,
         concurrency=settings.api_concurrency,
         requests_per_minute=settings.kick_requests_per_minute,
+        burst=settings.request_burst,
         retry=retry,
     )
     twitch = TwitchAdapter(
@@ -116,6 +118,7 @@ def build_platforms(
             auth_headers=lambda _t: {"X-Subscription-Token": key},
             concurrency=1,
             requests_per_minute=settings.search_requests_per_minute,
+            burst=settings.request_burst,
             retry=retry,
         )
         search = BraveSearchEngine(search_http, cache, settings.cache_ttl)

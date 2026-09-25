@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     twitch_requests_per_minute: int = 600
     kick_requests_per_minute: int = 120
     search_requests_per_minute: int = 30
+    # max requests sent back-to-back before the steady per-minute pace applies (1 = strictly even gaps)
+    request_burst: int = 2
     retry_count: int = 4
     retry_base_delay: float = 1.0
     retry_max_delay: float = 30.0
