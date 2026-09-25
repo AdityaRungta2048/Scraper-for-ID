@@ -14,8 +14,17 @@ from app.models.tables import RowStatus
 REMARK_NO_KICK = "no kick id"
 REMARK_NO_TWITCH = "no twitch id found"
 REMARK_NO_BOTH = "no Id on both platforms"
-REMARK_NEAREST = "nearest possible channel"
-APP_REMARKS = {REMARK_NO_KICK, REMARK_NO_TWITCH, REMARK_NO_BOTH, REMARK_NEAREST}
+REMARK_NEAREST_TWITCH = "nearest possible twitch channel"
+REMARK_NEAREST_KICK = "nearest possible kick channel"
+REMARK_NEAREST = {"twitch": REMARK_NEAREST_TWITCH, "kick": REMARK_NEAREST_KICK}
+APP_REMARKS = {
+    REMARK_NO_KICK,
+    REMARK_NO_TWITCH,
+    REMARK_NO_BOTH,
+    REMARK_NEAREST_TWITCH,
+    REMARK_NEAREST_KICK,
+    "nearest possible channel",  # wording used briefly by an earlier version
+}
 EMPTY_PLACEHOLDERS = {"", "none", "null", "nan", "n/a", "na", "-", "--", "unknown", "not found"}
 
 
@@ -68,15 +77,18 @@ def link_presence(source_platform: str, resolution: dict[str, Any]) -> dict[str,
     return {source_platform: resolution.get("source_status") == "EXISTS", target: has_target}
 
 
-def remark_for_links(links: dict[str, bool], confirmed_match: bool = False) -> str | None:
+def remark_for_links(
+    links: dict[str, bool], confirmed_match: bool = False, nearest_platform: str = "twitch"
+) -> str | None:
     """Remarks mirror the link columns: never say "no kick id" when a Kick link is given.
 
-    Both links present: empty for a confirmed match, otherwise the other-platform link is
-    only the closest account found -> "nearest possible channel".
+    Both links present: empty for a confirmed match; otherwise the ``nearest_platform`` link
+    (the platform being searched) is only the closest account found ->
+    "nearest possible twitch channel" / "nearest possible kick channel".
     """
     has_kick, has_twitch = links.get("kick", False), links.get("twitch", False)
     if has_kick and has_twitch:
-        return None if confirmed_match else REMARK_NEAREST
+        return None if confirmed_match else REMARK_NEAREST[nearest_platform]
     if has_kick:
         return REMARK_NO_TWITCH
     if has_twitch:
@@ -102,7 +114,10 @@ def transition(
     if key not in _TABLE:
         raise StateMachineError(f"undefined state {key}")
     case, write_id = _TABLE[key]
-    remark = remark_for_links(link_presence(source_platform, resolution), confirmed_match=write_id)
+    target = "twitch" if source_platform == "kick" else "kick"
+    remark = remark_for_links(
+        link_presence(source_platform, resolution), confirmed_match=write_id, nearest_platform=target
+    )
 
     matched = resolution.get("matched_id")
     if write_id and not matched:

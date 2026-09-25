@@ -1,7 +1,8 @@
 import pytest
 
 from app.excel.state_machine import (
-    REMARK_NEAREST,
+    REMARK_NEAREST_KICK,
+    REMARK_NEAREST_TWITCH,
     REMARK_NO_BOTH,
     REMARK_NO_KICK,
     REMARK_NO_TWITCH,
@@ -28,11 +29,11 @@ def res(source_status, decision, target_status=None, matched="Target_1", candida
     ("resolution", "dest", "remark", "status", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, RowStatus.MATCH, "KICK_A"),
-        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST, RowStatus.REVIEW, "KICK_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST_TWITCH, RowStatus.REVIEW, "KICK_B"),
         (
             res("EXISTS", "NO_MATCH", candidates=["closest"]),
             None,
-            REMARK_NEAREST,
+            REMARK_NEAREST_TWITCH,
             RowStatus.NO_MATCH,
             "KICK_B",
         ),
@@ -64,8 +65,8 @@ def test_kick_source_table(resolution, dest, remark, status, case):
     ("resolution", "dest", "remark", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, "TWITCH_A"),
-        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST, "TWITCH_B"),
-        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, REMARK_NEAREST, "TWITCH_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST_KICK, "TWITCH_B"),
+        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, REMARK_NEAREST_KICK, "TWITCH_B"),
         (res("EXISTS", "NO_MATCH"), None, REMARK_NO_KICK, "TWITCH_B"),
         (res("NOT_FOUND", "NO_MATCH", "NOT_FOUND"), None, REMARK_NO_BOTH, "TWITCH_C"),
         (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"), None, REMARK_NO_TWITCH, "TWITCH_C2"),
@@ -80,7 +81,7 @@ def test_twitch_source_table(resolution, dest, remark, case):
 def test_remark_never_says_no_kick_id_when_a_kick_link_is_given():
     # twitch source, twitch account exists, a (non-rejected) Kick account is linked
     out = transition("twitch", res("EXISTS", "NO_MATCH", candidates=["somekick"]))
-    assert out.remarks == REMARK_NEAREST  # a Kick link is given, but only the nearest channel
+    assert out.remarks == REMARK_NEAREST_KICK  # a Kick link is given, but only the nearest channel
     # ...but a candidate rejected in review is not linked, so no Kick id remains
     rejected = res("EXISTS", "NO_MATCH")
     rejected["candidates"] = [{"username": "somekick", "manual_verdict": "REJECTED"}]
@@ -90,7 +91,8 @@ def test_remark_never_says_no_kick_id_when_a_kick_link_is_given():
 def test_exact_remark_phrases():
     assert REMARK_NO_KICK == "no kick id"
     assert REMARK_NO_TWITCH == "no twitch id found"
-    assert REMARK_NEAREST == "nearest possible channel"
+    assert REMARK_NEAREST_TWITCH == "nearest possible twitch channel"
+    assert REMARK_NEAREST_KICK == "nearest possible kick channel"
     assert REMARK_NO_BOTH == "no Id on both platforms"
 
 
