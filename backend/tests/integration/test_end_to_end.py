@@ -208,13 +208,17 @@ async def test_channel_link_columns(fake, sf, tmp_path):
     assert cell("starwraith", 5).value == "https://www.twitch.tv/starwraith"
     assert cell("starwraith", 5).hyperlink.target == "https://www.twitch.tv/starwraith"
     assert cell("starwraith", 6).value == "https://kick.com/starwraith"
-    # ambiguous review: every candidate listed, labelled
-    twinz = cell("twinz", 5).value.splitlines()
-    assert len(twinz) == 2 and all("(needs review" in line for line in twinz)
-    # different person: still listed, clearly labelled — the ID column stays empty
-    assert "(not matched" in cell("alex123", 5).value and cell("alex123", 3).value is None
-    # source missing: same-name account flagged as unverified; no source link
-    assert cell("ghostkick", 5).value == "https://www.twitch.tv/ghostkick (same name, unverified)"
+    # exactly one link per cell, never a list or labels
+    for i in range(2, len(expects) + 2):
+        for col in (5, 6):
+            v = ws.cell(row=i, column=col).value
+            assert v is None or ("\n" not in v and " " not in v), (i, v)
+    # review row: the review candidate; the ID column stays empty
+    assert cell("twinz", 5).value == "https://www.twitch.tv/twinz" and cell("twinz", 3).value is None
+    # no match: the closest candidate (same name first) is linked, the ID stays empty
+    assert cell("alex123", 5).value == "https://www.twitch.tv/alex123" and cell("alex123", 3).value is None
+    # source missing: the same-name account is linked; no source link
+    assert cell("ghostkick", 5).value == "https://www.twitch.tv/ghostkick"
     assert cell("ghostkick", 6).value is None
     # nothing found / API error rows get no links
     assert cell("unknownabc", 5).value is None and cell("flaky", 5).value is None

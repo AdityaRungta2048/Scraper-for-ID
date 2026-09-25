@@ -18,6 +18,7 @@ from app.excel.review_report import review_filename, write_review_report
 from app.excel.state_machine import transition
 from app.excel.verifier import verify_output
 from app.logging_setup import get_logger
+from app.matching.normalize import normalize_username
 from app.models import JobStatus, ManualReview, ProcessingJob, ProcessingRow, RowStatus
 from app.models.tables import ERROR_STATUSES, new_id
 from app.platforms.base import PlatformAdapter
@@ -27,6 +28,8 @@ from app.services.resolver import apply_manual_reviews
 from app.version import MATCHING_ENGINE_VERSION
 
 log = get_logger("jobs")
+# Bump when the processed-workbook layout changes: existing jobs are re-exported on download.
+EXPORT_FORMAT_VERSION = 2
 NORMALIZERS: dict[str, type[PlatformAdapter]] = {"twitch": TwitchAdapter, "kick": KickAdapter}
 
 
@@ -229,6 +232,7 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
             "checks": [{"name": "export", "ok": False, "detail": f"{type(exc).__name__}: {exc}"}],
             "mismatches": [],
         }
+    report["export_format"] = EXPORT_FORMAT_VERSION
     job.verification_json = report
     if not report["ok"]:
         if out_path.exists():
@@ -314,18 +318,16 @@ def verdict_key(row: ProcessingRow) -> str:
     return row.source_key or f"invalid:{(row.source_value or '').strip().lower()}"
 
 
-def _pct(value: Any) -> str:
-    return f", {round(value)}%" if isinstance(value, (int, float)) else ""
-
-
 def channel_links(
     row: ProcessingRow, source_platform: str, verdicts: dict[str, str]
 ) -> dict[str, str | None] | None:
-    """Text for the twitch_id_link / kick_id_link cells: every channel the engine found.
+    """One channel URL per platform for the twitch_id_link / kick_id_link cells.
 
-    The matched channel comes first as a plain URL (it becomes the cell's hyperlink); every
-    other account the engine looked at is listed with a label saying what it is — these
-    are for convenience only and never change the ID column.
+    * source platform: the row's own channel (if the account exists)
+    * other platform: the single best account — the confirmed match; otherwise the review
+      candidate; otherwise the closest candidate found (exact same name first, then
+      confidence). Accounts rejected in review are never shown. The ID column is still
+      only filled for verified matches, so an empty ID next to a link means "unconfirmed".
     """
     ev = row.evidence_json
     if not ev or row.status == RowStatus.SKIPPED_EMPTY.value:
@@ -341,29 +343,26 @@ def channel_links(
             src["username"]
         )
 
-    matched = (row.matched_id or "").lower() if row.decision == "MATCH" else ""
-    lines: list[str] = []
-    candidates = sorted(ev.get("candidates") or [], key=lambda c: -(c.get("confidence") or 0))
-    for c in candidates:
-        user = c.get("username")
-        if not user:
-            continue
-        url = c.get("profile_url") or CHANNEL_URL[target].format(user)
-        verdict = verdicts.get(user)
-        if user == matched:
-            label = " (confirmed in review)" if verdict == "CONFIRMED" else ""
-            lines.insert(0, url + label)
-            continue
-        if verdict == "REJECTED":
-            label = " (rejected in review)"
-        elif ev.get("source_status") == "NOT_FOUND":
-            label = " (same name, unverified)"  # the source account itself does not exist
-        elif c.get("decision") in ("MATCH", "REVIEW"):
-            label = f" (needs review{_pct(c.get('confidence'))})"
-        else:
-            label = f" (not matched{_pct(c.get('confidence'))})"
-        lines.append(url + label)
-    if matched and not any(line.split(" ")[0].lower().endswith("/" + matched) for line in lines):
-        lines.insert(0, CHANNEL_URL[target].format(matched))
-    links[target] = "\n".join(lines) or None
+    candidates = [
+        c
+        for c in (ev.get("candidates") or [])
+        if c.get("username") and verdicts.get(c["username"]) != "REJECTED"
+    ]
+    best: str | None = None
+    if row.decision == "MATCH" and row.matched_id:
+        best = row.matched_id.lower()
+    elif row.review_candidate and row.review_candidate not in {
+        u for u, v in verdicts.items() if v == "REJECTED"
+    }:
+        best = row.review_candidate
+    elif candidates:
+        source_name = normalize_username(row.source_value)
+
+        def rank(c: dict[str, Any]) -> tuple[bool, float]:
+            return (normalize_username(c["username"]) == source_name, c.get("confidence") or 0.0)
+
+        best = max(candidates, key=rank)["username"]
+    if best:
+        profile = next((c for c in candidates if c["username"] == best), None)
+        links[target] = (profile or {}).get("profile_url") or CHANNEL_URL[target].format(best)
     return links

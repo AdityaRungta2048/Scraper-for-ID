@@ -19,7 +19,7 @@ from app.excel.review_report import review_filename
 from app.models import JobStatus, ProcessingJob, ProcessingRow, RowStatus
 from app.models.tables import ERROR_STATUSES
 from app.reviews.service import ReviewError, review_items, submit_verdict
-from app.services.jobs import build_export, create_job, recompute_counters, start_job
+from app.services.jobs import EXPORT_FORMAT_VERSION, build_export, create_job, recompute_counters, start_job
 from app.version import MATCHING_ENGINE_VERSION
 from app.workers.processor import is_stale
 from app.workers.queue import enqueue_job
@@ -203,8 +203,15 @@ def _ensure_export(db: Session, settings: Settings, job: ProcessingJob) -> None:
     if job.status not in (JobStatus.COMPLETED.value, JobStatus.PARTIAL.value):
         raise HTTPException(409, f"The processed workbook is not available (job is {job.status}).")
     cols = job.columns_json or {}
+    outdated = (job.verification_json or {}).get("export_format") != EXPORT_FORMAT_VERSION
     missing_link_columns = cols.get("twitch_link") is None or cols.get("kick_link") is None
-    if job.export_stale or missing_link_columns or not job.output_path or not Path(job.output_path).exists():
+    if (
+        job.export_stale
+        or outdated
+        or missing_link_columns
+        or not job.output_path
+        or not Path(job.output_path).exists()
+    ):
         report = build_export(db, settings, job)
         if not report["ok"]:
             raise HTTPException(500, job.error_message or "Output verification failed.")

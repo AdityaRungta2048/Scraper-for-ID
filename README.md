@@ -207,19 +207,16 @@ re-saved as `.xlsx`).
 | empty source cell | row untouched | row untouched |
 
 **Channel-link columns.** Two columns are appended after your last used column,
-`twitch_id_link` and `kick_id_link` (reused if the sheet already has them). They list every
-channel the engine found for that row, one per line:
+`twitch_id_link` and `kick_id_link` (reused if the sheet already has them), with **one
+clickable link each**:
 
-| Line | Meaning |
-|---|---|
-| `https://kick.com/nikkilve` | the source account's own channel |
-| `https://www.twitch.tv/nikklive_` | the matched account (first line; the cell's hyperlink) |
-| `… (confirmed in review)` / `(rejected in review)` | your manual verdict |
-| `… (needs review, 84%)` | a plausible candidate that was not safe to auto-match |
-| `… (same name, unverified)` | source missing; an account with the same name exists |
-| `… (not matched, 12%)` | an account that was checked and judged a different person |
+* the source platform's column: the row's own channel (empty if that account doesn't exist);
+* the other platform's column: the single best account — the confirmed match; otherwise the
+  review candidate; otherwise the closest account found (same name first, then confidence).
+  Accounts you rejected in review are never linked.
 
-These columns are informational only: the ID column is still filled only for verified matches.
+The ID column is still filled only for verified matches, so **a link next to an empty ID is
+an unconfirmed suggestion** — check it before relying on it.
 
 Guarantees: rows are never sorted, inserted, deleted or de-duplicated; results are written by
 the original Excel row number; source IDs, countries, other sheets, formatting, widths, filters,

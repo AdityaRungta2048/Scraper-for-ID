@@ -171,3 +171,18 @@ def test_retry_failed_endpoint(client, fake, tmp_path):
     wait_inline(job["id"], timeout=60)
     job = client.get(f"/api/jobs/{job['id']}").json()
     assert job["status"] == "COMPLETED" and job["error_count"] == 0
+
+
+def test_outdated_export_is_rebuilt_on_download(client, fake, sf, tmp_path):
+    from app.models import ProcessingJob
+
+    fake.add_twitch("kosstochka")
+    path = make_workbook(tmp_path / "old.xlsx", TWITCH_HEADERS, [["kosstochka", "Italy", None, None]])
+    job = run_to_completion(client, upload(client, path).json()["id"])
+    with sf() as s:  # simulate a file produced by an older export layout
+        j = s.get(ProcessingJob, job["id"])
+        j.verification_json = {**j.verification_json, "export_format": 1}
+        s.commit()
+    ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
+    assert ws["E2"].value == "https://www.twitch.tv/kosstochka"
+    assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["export_format"] == 2
