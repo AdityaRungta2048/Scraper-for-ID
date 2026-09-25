@@ -114,7 +114,7 @@ Signals (each reports `available`, `score 0..1`, `points`, `explanation`):
 |---|---|---|---|
 | Explicit cross-link | link | strong | candidate ↔ source URL on the other platform. A link from the source to a *different* account on the target platform is a hard conflict. |
 | Shared unique social identity | social | strong | normalized (instagram/youtube/x/tiktok/website/linktree/beacons …). Discord invites & generic hosts are weak. Each distinct shared identity adds points (diminishing). |
-| Profile image | image | strong when ≥ threshold **and** not generic | pHash + dHash + aHash + colour-histogram on normalised (RGB, square, border-trimmed, centre-crop variants) images. Default avatars, low-complexity images, and images whose hash is seen on ≥ N unrelated accounts are "generic" → weight × 0.15. |
+| Profile image | image | strong when ≥ threshold **and** not generic | pHash + dHash + aHash on normalised images (RGB, alpha on white, square; untrimmed, border-trimmed and centre-crop variants, best-aligned pair wins). On the test corpus the same picture after platform processing scores ≥ 0.91 and different pictures ≤ 0.68. Default avatars, low-complexity images, and images whose hash is seen on ≥ N unrelated accounts are "generic" → weight × 0.15. |
 | Username | name | supporting | normalised (NFKC, casefold, accent fold, separators), Levenshtein/Jaro-Winkler/token/n-gram max; affix-stripped equality is only a feature; scaled by name distinctiveness (short/common names count less). |
 | Display name | name | supporting | same machinery; shares the "name" family with username (they are not independent). |
 | Bio | text | supporting | URLs/boilerplate/generic gaming words removed; char n-gram TF-IDF cosine (+ optional multilingual sentence-transformer); too-short/generic bios are "unavailable". |
@@ -124,9 +124,14 @@ Signals (each reports `available`, `score 0..1`, `points`, `explanation`):
 ## F. Confidence & decision strategy
 
 * Points are summed (negative evidence subtracts) and mapped to
-  `confidence = 100·(1 − e^(−points/CONFIDENCE_SCALE))` (default scale 19.5).
-  Example: exact distinctive username (15) + display name (10) + country (2) →
-  75 (REVIEW); add a strong non-generic image match (20) → 91.
+  `confidence = 100·(1 − e^(−points/CONFIDENCE_SCALE))` (default scale 16, tuned
+  on the test suite; the initial 19.5 left "same distinctive name + same picture"
+  at 85). The name family (username + display name) is capped at 20 points.
+  Examples: exact distinctive username (15) + redundant display name (3) +
+  country (2) → 71 (REVIEW, and name-only evidence is capped below MATCH anyway);
+  add a strong non-generic image match (20) → 92 (MATCH). A 4–5 letter name
+  earns only 35–50 % of the username weight, so "short name + same picture"
+  stays in REVIEW.
 * **Gates** (conditions, not only a number) for MATCH:
   * `confidence ≥ MATCH_THRESHOLD` (90), **and**
   * (≥ 1 strong signal **and** ≥ 1 supporting signal from a different family)

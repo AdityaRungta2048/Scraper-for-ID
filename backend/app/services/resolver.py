@@ -231,7 +231,8 @@ class IdentityResolver:
             "matched_username": best.candidate.username if best and decision == Decision.MATCH else None,
             "matched_id": display_id(best.candidate) if best and decision == Decision.MATCH else None,
             "review_candidate": best.candidate.username if best and decision == Decision.REVIEW else None,
-            "confidence": best.confidence if best else None,
+            # an unverified same-name account has no meaningful confidence score
+            "confidence": best.confidence if best and target_status == "VERIFIED" else None,
             "reason": reason,
             "candidate_count": len(evals),
             "candidates": [e.to_dict() for e in evals],

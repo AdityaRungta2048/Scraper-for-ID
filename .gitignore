@@ -10,6 +10,7 @@ venv/
 
 # App data (uploads, outputs, sqlite)
 backend/data/
+backend/data-demo/
 data/
 *.db
 *.db-wal
@@ -32,3 +33,4 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+.sandbox/

@@ -1,0 +1,67 @@
+# Full stack: PostgreSQL + Redis + API + RQ worker + Next.js frontend.
+#   cp .env.example .env   # add Twitch/Kick credentials
+#   docker compose up --build
+#   open http://localhost:3000
+name: streamer-matcher
+
+x-backend-env: &backend-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://matcher:matcher@postgres:5432/matcher
+    REDIS_URL: redis://redis:6379/0
+    QUEUE_BACKEND: rq
+    DATA_DIR: /data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: matcher
+      POSTGRES_PASSWORD: matcher
+      POSTGRES_DB: matcher
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matcher"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build: { context: ., dockerfile: docker/backend.Dockerfile }
+    <<: *backend-env
+    volumes: [appdata:/data]  # uploads + generated workbooks, shared with the worker
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      retries: 12
+
+  worker:
+    build: { context: ., dockerfile: docker/backend.Dockerfile }
+    <<: *backend-env
+    command: ["sh", "-c", "rq worker matcher --url $$REDIS_URL"]
+    volumes: [appdata:/data]
+    depends_on:
+      backend: { condition: service_healthy }
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args: { BACKEND_URL: "http://backend:8000" }
+    ports: ["3000:3000"]
+    depends_on:
+      backend: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  appdata:

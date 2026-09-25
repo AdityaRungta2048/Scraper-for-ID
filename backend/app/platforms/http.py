@@ -129,7 +129,7 @@ class ClientCredentialsToken:
             if resp.status_code in (400, 401, 403):
                 raise AuthenticationError(
                     f"{self.platform} rejected the client credentials (HTTP {resp.status_code}). "
-                    "Check the client id/secret.",
+                    "Check the client id/secret, and that no proxy/firewall blocks the token endpoint.",
                     platform=self.platform,
                     status_code=resp.status_code,
                 )
