@@ -166,7 +166,8 @@ per-case remark table), for both source platforms:
 
 | Kick link present | Twitch link present | remarks |
 |---|---|---|
-| yes | yes | *(empty)* |
+| yes | yes, confirmed match | *(empty)* |
+| yes | yes, closest account only | `nearest possible channel` |
 | yes | no | `no twitch id found` |
 | no | yes | `no kick id` |
 | no | no | `no Id on both platforms` |

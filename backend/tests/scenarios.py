@@ -134,14 +134,18 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
 
     return [
         Expect("starwraith", "Spain", "StarWraith", None, "MATCH", "exact username same person"),
-        Expect("alex123", "France", None, None, "*", "exact username different people"),
+        Expect("alex123", "France", None, "nearest possible channel", "*", "exact username different people"),
         Expect("nikkilve", "Germany", "NikkLive_", None, "MATCH", "similar username same person"),
-        Expect("fekah", "France", None, None, "*", "similar usernames different people"),
+        Expect(
+            "fekah", "France", None, "nearest possible channel", "*", "similar usernames different people"
+        ),
         Expect("the-real-abc", "France", "ABCOfficialTV", None, "MATCH", "different usernames same person"),
-        Expect("genericguy", "Italy", None, None, "*", "generic profile image"),
+        Expect("genericguy", "Italy", None, "nearest possible channel", "*", "generic profile image"),
         Expect("ytcreator", "Spain", "YTCreator_TV", None, "MATCH", "same YouTube"),
         Expect("sitecreator", "France", "site_creator", None, "MATCH", "same website"),
-        Expect("bluefox", "Germany", None, None, "*", "same display name different person"),
+        Expect(
+            "bluefox", "Germany", None, "nearest possible channel", "*", "same display name different person"
+        ),
         Expect(
             "unknownabc", "France", None, "no Id on both platforms", "SOURCE_NOT_FOUND", "not found anywhere"
         ),
@@ -157,11 +161,13 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
         Expect("jose-pena", "Spain", "JosePena", None, "MATCH", "accented name"),
         Expect("quentin-cey", "France", "quentin_cey", None, "MATCH", "hyphen vs underscore"),
         Expect("ayzoh", "France", "ayzohTV", None, "MATCH", "TV suffix"),
-        Expect("marco", "Italy", None, None, "*", "live suffix different person"),
+        Expect("marco", "Italy", None, "nearest possible channel", "*", "live suffix different person"),
         Expect("davidsantos-", "Spain", "davidsantos_oficial", None, "MATCH", "official suffix"),
-        Expect("twinz", "France", None, None, "REVIEW", "ambiguous candidates"),
-        Expect("conflicted", "France", None, None, "REVIEW", "conflicting explicit link"),
-        Expect("abc", "France", None, None, "*", "abc vs abcgaming"),
+        Expect("twinz", "France", None, "nearest possible channel", "REVIEW", "ambiguous candidates"),
+        Expect(
+            "conflicted", "France", None, "nearest possible channel", "REVIEW", "conflicting explicit link"
+        ),
+        Expect("abc", "France", None, "nearest possible channel", "*", "abc vs abcgaming"),
         Expect("ratelimited", "Spain", "RateLimited", None, "MATCH", "rate limit recovered"),
         Expect("timeoutguy", "Spain", "timeoutguy", None, "MATCH", "timeout recovered"),
     ]
@@ -189,7 +195,9 @@ def build_twitch_world(f: FakePlatforms) -> list[Expect]:
         Expect("starwraith", "Spain", "starwraith", None, "MATCH", "exact username same person"),
         Expect("unknowntw", "Italy", None, "no Id on both platforms", "SOURCE_NOT_FOUND", "none"),
         Expect("jimmyboyyy", "France", None, "no kick id", "*", "different person; no kick candidate found"),
-        Expect("fierik", "Italy", None, None, "*", "generic avatars; kick fierik linked"),
+        Expect(
+            "fierik", "Italy", None, "nearest possible channel", "*", "generic avatars; kick fierik linked"
+        ),
         Expect(
             "kal-75020yt", "France", None, "no twitch id found", "SOURCE_NOT_FOUND", "invalid twitch login"
         ),

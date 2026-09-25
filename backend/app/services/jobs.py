@@ -29,7 +29,7 @@ from app.version import MATCHING_ENGINE_VERSION
 
 log = get_logger("jobs")
 # Bump when the processed-workbook layout changes: existing jobs are re-exported on download.
-EXPORT_FORMAT_VERSION = 3
+EXPORT_FORMAT_VERSION = 4
 NORMALIZERS: dict[str, type[PlatformAdapter]] = {"twitch": TwitchAdapter, "kick": KickAdapter}
 
 

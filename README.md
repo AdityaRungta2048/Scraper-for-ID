@@ -198,14 +198,18 @@ re-saved as `.xlsx`).
 sheet) is written **only for a confirmed match** (or one you confirm on the Review page).
 
 The remark follows the two link columns described below, using the exact phrases
-`no kick id`, `no twitch id found` and `no Id on both platforms`:
+`nearest possible channel`, `no kick id`, `no twitch id found` and `no Id on both platforms`:
 
 | Kick link | Twitch link | remarks |
 |---|---|---|
-| ✓ | ✓ | *(empty)* |
+| ✓ | ✓ confirmed match | *(empty)* |
+| ✓ | ✓ closest account only (not confirmed) | `nearest possible channel` |
 | ✓ | — | `no twitch id found` |
 | — | ✓ | `no kick id` |
 | — | — | `no Id on both platforms` |
+
+(Mirrored for Twitch sheets. When the source ID itself doesn't exist, the `no … id` remark is
+used even if the other platform's link is only the closest account.)
 
 API/network errors leave the row **untouched** (reported as an error, retryable), and an
 empty source cell is left untouched.
