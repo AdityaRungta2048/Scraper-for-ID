@@ -39,7 +39,16 @@ _ALIASES = {
     "comments": "remarks",
     "comment": "remarks",
     "notes": "remarks",
+    "twitch_id_link": "twitch_id_link",
+    "twitch_link": "twitch_id_link",
+    "twitch_url": "twitch_id_link",
+    "twitch_channel_link": "twitch_id_link",
+    "kick_id_link": "kick_id_link",
+    "kick_link": "kick_id_link",
+    "kick_url": "kick_id_link",
+    "kick_channel_link": "kick_id_link",
 }
+LINK_HEADERS = {"twitch": "twitch_id_link", "kick": "kick_id_link"}
 
 
 class WorkbookValidationError(ValueError):
@@ -64,6 +73,11 @@ class ColumnMap:
     country: int | None
     remarks: int | None  # None => the exporter adds a "remarks" header in ``remarks_new_col``
     remarks_new_col: int | None = None
+    # Channel-link columns (existing, or appended after the last used column).
+    twitch_link: int | None = None
+    kick_link: int | None = None
+    # header cells the exporter must create: {"<column index>": "<header text>"}
+    new_headers: dict[str, str] | None = None
 
     def source_col(self, platform: str) -> int:
         return self.id_kick if platform == "kick" else self.id_twitch
@@ -76,6 +90,9 @@ class ColumnMap:
         col = self.remarks if self.remarks is not None else self.remarks_new_col
         assert col is not None
         return col
+
+    def link_col(self, platform: str) -> int | None:
+        return self.twitch_link if platform == "twitch" else self.kick_link
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -153,7 +170,10 @@ def analyze_workbook(path: Path) -> WorkbookAnalysis:
             normed = [normalize_header(v) for v in raw]
             cols: dict[str, int] = {}
             for idx, h in enumerate(normed, start=1):
-                if h in {"id_kick", "id_twitch", "country", "remarks"} and h not in cols:
+                if (
+                    h in {"id_kick", "id_twitch", "country", "remarks", *LINK_HEADERS.values()}
+                    and h not in cols
+                ):
                     cols[h] = idx
             if "id_kick" in cols and "id_twitch" in cols:
                 matches.append((ws, r, cols, [str(v) if v is not None else "" for v in raw]))
@@ -185,6 +205,9 @@ def analyze_workbook(path: Path) -> WorkbookAnalysis:
         )
     if "country" not in cols:
         warnings.append("No 'country' column found; country evidence will not be used.")
+    link_cols, new_headers = _link_columns(
+        ws, header_row, cols, reserved={remarks_new_col} if remarks_new_col else set()
+    )
     colmap = ColumnMap(
         sheet_name=ws.title,
         header_row=header_row,
@@ -193,6 +216,9 @@ def analyze_workbook(path: Path) -> WorkbookAnalysis:
         country=cols.get("country"),
         remarks=cols.get("remarks"),
         remarks_new_col=remarks_new_col,
+        twitch_link=link_cols["twitch"],
+        kick_link=link_cols["kick"],
+        new_headers=new_headers,
     )
 
     last = _last_data_row(ws, header_row, [c for c in cols.values()])
@@ -274,3 +300,42 @@ def read_rows(path: Path, columns: ColumnMap, source_platform: str) -> list[Impo
             )
         )
     return rows
+
+
+def _link_columns(
+    ws: Any, header_row: int, cols: dict[str, int], reserved: set[int]
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Reuse existing twitch_id_link / kick_id_link columns, otherwise place new ones in the
+    first completely empty columns to the right of all existing data (never between columns)."""
+    result: dict[str, int] = {}
+    new_headers: dict[str, str] = {}
+    last_used = max(
+        [c for c in range(1, ws.max_column + 1) if _column_has_data(ws, c)] + list(reserved) + [0]
+    )
+    next_col = last_used + 1
+    for platform in ("twitch", "kick"):
+        header = LINK_HEADERS[platform]
+        if header in cols:
+            result[platform] = cols[header]
+            continue
+        result[platform] = next_col
+        new_headers[str(next_col)] = header
+        next_col += 1
+    return result, new_headers
+
+
+def _column_has_data(ws: Any, col: int) -> bool:
+    return any(ws.cell(row=r, column=col).value not in (None, "") for r in range(1, ws.max_row + 1))
+
+
+def upgrade_columns(columns: ColumnMap, path: Path) -> ColumnMap:
+    """Jobs created before link columns existed: compute their placement from the original file."""
+    if columns.twitch_link is not None and columns.kick_link is not None:
+        return columns
+    fresh = analyze_workbook(path).columns
+    columns.twitch_link, columns.kick_link, columns.new_headers = (
+        fresh.twitch_link,
+        fresh.kick_link,
+        fresh.new_headers,
+    )
+    return columns

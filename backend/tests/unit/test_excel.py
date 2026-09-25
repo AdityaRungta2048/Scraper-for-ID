@@ -204,3 +204,20 @@ def test_export_adds_remarks_header_when_missing(tmp_path):
     ws = load_workbook(out).active
     assert ws["D1"].value == "remarks" and ws["D2"].value == "no kick id"
     assert verify_output(src, out, a.columns, "kick", expected, [(2, "abc")]).ok
+
+
+def test_link_columns_placed_after_all_existing_columns(tmp_path):
+    p = make_workbook(tmp_path / "wide.xlsx", [*KICK_HEADERS, "notes"], [["abc", "France", None, None, "x"]])
+    a = analyze_workbook(p)
+    assert (a.columns.twitch_link, a.columns.kick_link) == (6, 7)
+    assert a.columns.new_headers == {"6": "twitch_id_link", "7": "kick_id_link"}
+
+
+def test_verifier_detects_wrong_hyperlink(tmp_path):
+    writes = [CellWrite(2, False, None, False, None, {"twitch": "https://www.twitch.tv/a", "kick": None})]
+    src, out, a, expected = _export(tmp_path, writes)
+    wb = load_workbook(out)
+    wb["Streamers"]["E2"].hyperlink = "https://evil.example.com"
+    wb.save(out)
+    rep = verify_output(src, out, a.columns, "kick", expected, [(2, "trsniIs")])
+    assert not rep.ok and not next(c for c in rep.checks if c.name == "hyperlinks[Streamers]").ok

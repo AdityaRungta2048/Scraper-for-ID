@@ -192,3 +192,61 @@ async def test_existing_destination_policy(fake, sf, tmp_path, monkeypatch, poli
         assert ws["C2"].value == "typed_by_hand" and ws["D2"].value == "keep me"
     else:
         assert ws["C2"].value == "StarWraith" and ws["D2"].value == "keep me"
+
+
+async def test_channel_link_columns(fake, sf, tmp_path):
+    expects = build_kick_world(fake)
+    job = await run(sf, _book(tmp_path, "links.xlsx", KICK_HEADERS, expects))
+    ws = load_workbook(job.output_path)["Streamers"]
+    assert [ws.cell(row=1, column=c).value for c in (5, 6)] == ["twitch_id_link", "kick_id_link"]
+    row = {e.source: i for i, e in enumerate(expects, start=2) if e.source}
+
+    def cell(src, col):
+        return ws.cell(row=row[src], column=col)
+
+    # confident match: plain, clickable channel links on both platforms
+    assert cell("starwraith", 5).value == "https://www.twitch.tv/starwraith"
+    assert cell("starwraith", 5).hyperlink.target == "https://www.twitch.tv/starwraith"
+    assert cell("starwraith", 6).value == "https://kick.com/starwraith"
+    # ambiguous review: every candidate listed, labelled
+    twinz = cell("twinz", 5).value.splitlines()
+    assert len(twinz) == 2 and all("(needs review" in line for line in twinz)
+    # different person: still listed, clearly labelled — the ID column stays empty
+    assert "(not matched" in cell("alex123", 5).value and cell("alex123", 3).value is None
+    # source missing: same-name account flagged as unverified; no source link
+    assert cell("ghostkick", 5).value == "https://www.twitch.tv/ghostkick (same name, unverified)"
+    assert cell("ghostkick", 6).value is None
+    # nothing found / API error rows get no links
+    assert cell("unknownabc", 5).value is None and cell("flaky", 5).value is None
+    assert job.verification_json["ok"]
+
+
+async def test_existing_link_columns_are_reused(fake, sf, tmp_path):
+    build_kick_world(fake)
+    headers = ["id_kick", "country", "id_twitch", "remarks", "Twitch ID Link", "Kick ID Link"]
+    path = make_workbook(
+        tmp_path / "again.xlsx", headers, [["starwraith", "Spain", None, None, "stale", None]]
+    )
+    job = await run(sf, path)
+    ws = load_workbook(job.output_path)["Streamers"]
+    assert ws.max_column == 6  # no extra columns appended
+    assert ws["E2"].value == "https://www.twitch.tv/starwraith"  # stale value replaced
+
+
+async def test_jobs_from_before_link_columns_get_them_on_next_export(fake, sf, tmp_path):
+    from app.services.jobs import build_export
+
+    build_kick_world(fake)
+    job = await run(
+        sf, _book(tmp_path, "old.xlsx", KICK_HEADERS, [Expect("starwraith", "Spain", None, None, "*", "")])
+    )
+    with sf() as s:
+        j = s.get(ProcessingJob, job.id)
+        j.columns_json = {
+            k: v for k, v in j.columns_json.items() if k not in ("twitch_link", "kick_link", "new_headers")
+        }
+        s.commit()
+        report = build_export(s, get_settings(), j)
+        assert report["ok"]
+        ws = load_workbook(j.output_path)["Streamers"]
+    assert ws["E1"].value == "twitch_id_link" and ws["E2"].value == "https://www.twitch.tv/starwraith"

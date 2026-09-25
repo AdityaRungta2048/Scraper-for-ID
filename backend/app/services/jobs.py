@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.excel.exporter import CellWrite, ExportError, export_processed, output_filename
-from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows
+from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows, upgrade_columns
 from app.excel.review_report import review_filename, write_review_report
 from app.excel.state_machine import transition
 from app.excel.verifier import verify_output
@@ -188,23 +188,36 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
     If verification fails, the output file is removed and the job is marked FAILED —
     an unverified workbook is never offered for download.
     """
+    original = Path(job.stored_path)
     columns = ColumnMap.from_dict(job.columns_json or {})
+    if columns.twitch_link is None or columns.kick_link is None:  # job created before link columns
+        columns = upgrade_columns(columns, original)
+        job.columns_json = columns.to_dict()
     platform = job.source_platform or ""
     rows = list(
         session.execute(
             select(ProcessingRow).where(ProcessingRow.job_id == job.id).order_by(ProcessingRow.original_row)
         ).scalars()
     )
-    writes = [
-        CellWrite(
-            r.original_row, r.write_destination, r.output_destination, r.write_remarks, r.output_remarks
-        )
-        for r in rows
-        if RowStatus(r.status).is_final and (r.write_destination or r.write_remarks)
-    ]
+    verdicts = manual_verdicts(session, platform)
+    writes = []
+    for r in rows:
+        if not RowStatus(r.status).is_final:
+            continue
+        links = channel_links(r, platform, verdicts.get(verdict_key(r), {}))
+        if r.write_destination or r.write_remarks or links is not None:
+            writes.append(
+                CellWrite(
+                    r.original_row,
+                    r.write_destination,
+                    r.output_destination,
+                    r.write_remarks,
+                    r.output_remarks,
+                    links,
+                )
+            )
     out_dir = settings.outputs_dir / job.id
     out_path = out_dir / output_filename(job.filename)
-    original = Path(job.stored_path)
     try:
         expected = export_processed(original, out_path, columns, platform, writes)
         report = verify_output(
@@ -291,3 +304,66 @@ def _row_report_dict(r: ProcessingRow) -> dict[str, Any]:
         "error_message": r.error_message,
         "evidence_json": ev,
     }
+
+
+OTHER_PLATFORM = {"kick": "twitch", "twitch": "kick"}
+CHANNEL_URL = {"twitch": "https://www.twitch.tv/{}", "kick": "https://kick.com/{}"}
+
+
+def verdict_key(row: ProcessingRow) -> str:
+    return row.source_key or f"invalid:{(row.source_value or '').strip().lower()}"
+
+
+def _pct(value: Any) -> str:
+    return f", {round(value)}%" if isinstance(value, (int, float)) else ""
+
+
+def channel_links(
+    row: ProcessingRow, source_platform: str, verdicts: dict[str, str]
+) -> dict[str, str | None] | None:
+    """Text for the twitch_id_link / kick_id_link cells: every channel the engine found.
+
+    The matched channel comes first as a plain URL (it becomes the cell's hyperlink); every
+    other account the engine looked at is listed with a label saying what it is — these
+    are for convenience only and never change the ID column.
+    """
+    ev = row.evidence_json
+    if not ev or row.status == RowStatus.SKIPPED_EMPTY.value:
+        return None
+    target = OTHER_PLATFORM.get(source_platform)
+    if target is None:
+        return None
+    links: dict[str, str | None] = {source_platform: None, target: None}
+
+    src = ev.get("source_profile") or {}
+    if ev.get("source_status") == "EXISTS" and src.get("username"):
+        links[source_platform] = src.get("profile_url") or CHANNEL_URL[source_platform].format(
+            src["username"]
+        )
+
+    matched = (row.matched_id or "").lower() if row.decision == "MATCH" else ""
+    lines: list[str] = []
+    candidates = sorted(ev.get("candidates") or [], key=lambda c: -(c.get("confidence") or 0))
+    for c in candidates:
+        user = c.get("username")
+        if not user:
+            continue
+        url = c.get("profile_url") or CHANNEL_URL[target].format(user)
+        verdict = verdicts.get(user)
+        if user == matched:
+            label = " (confirmed in review)" if verdict == "CONFIRMED" else ""
+            lines.insert(0, url + label)
+            continue
+        if verdict == "REJECTED":
+            label = " (rejected in review)"
+        elif ev.get("source_status") == "NOT_FOUND":
+            label = " (same name, unverified)"  # the source account itself does not exist
+        elif c.get("decision") in ("MATCH", "REVIEW"):
+            label = f" (needs review{_pct(c.get('confidence'))})"
+        else:
+            label = f" (not matched{_pct(c.get('confidence'))})"
+        lines.append(url + label)
+    if matched and not any(line.split(" ")[0].lower().endswith("/" + matched) for line in lines):
+        lines.insert(0, CHANNEL_URL[target].format(matched))
+    links[target] = "\n".join(lines) or None
+    return links

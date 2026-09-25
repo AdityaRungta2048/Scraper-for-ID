@@ -186,6 +186,10 @@ Other rules:
   (`EXISTING_DESTINATION_POLICY=preserve`); the row is still verified and any
   disagreement is reported in the review report. `overwrite` is available.
 * A pre-existing remark that is not one of the two app phrases is never erased.
+* Two informational columns, `twitch_id_link` and `kick_id_link`, are appended after the
+  last used column (or reused if present). They list the source channel, the matched
+  channel, and every other candidate with a label (needs review / not matched / …). They
+  never influence the ID or remarks columns.
 * Nothing else in the workbook is modified; output is `<stem>_processed.xlsx`.
 
 ## H. How row order is guaranteed

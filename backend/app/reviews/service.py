@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import JobStatus, ManualReview, ProcessingJob, ProcessingRow, RowStatus
-from app.services.jobs import apply_resolution_to_row, best_candidate, manual_verdicts, recompute_counters
+from app.services.jobs import (
+    apply_resolution_to_row,
+    best_candidate,
+    manual_verdicts,
+    recompute_counters,
+    verdict_key,
+)
 from app.version import MATCHING_ENGINE_VERSION
 
 VERDICTS = {"CONFIRM": "CONFIRMED", "REJECT": "REJECTED"}
@@ -22,10 +28,6 @@ VERDICTS = {"CONFIRM": "CONFIRMED", "REJECT": "REJECTED"}
 
 class ReviewError(ValueError):
     pass
-
-
-def verdict_key(row: ProcessingRow) -> str:
-    return row.source_key or f"invalid:{(row.source_value or '').strip().lower()}"
 
 
 def review_items(session: Session, job: ProcessingJob, include_decided: bool = False) -> list[dict[str, Any]]:

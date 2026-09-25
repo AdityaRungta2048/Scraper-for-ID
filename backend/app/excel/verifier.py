@@ -17,6 +17,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from app.excel.exporter import first_url, link_cells
 from app.excel.importer import ColumnMap, cell_text
 
 
@@ -51,6 +52,11 @@ def _v(value: Any) -> Any:
     if value is None or isinstance(value, (int, float, str, bool)):
         return value
     return repr(value)
+
+
+def _link(cell: Any) -> str | None:
+    h = getattr(cell, "hyperlink", None)
+    return h.target if h is not None else None
 
 
 def _style_sig(cell: Any) -> tuple[Any, ...]:
@@ -130,11 +136,6 @@ def verify_output(
         n_w = {k: v.width for k, v in n_ws.column_dimensions.items() if k in o_w}
         rep.add(f"column_widths[{name}]", o_w == n_w)
         rep.add(
-            f"hyperlinks[{name}]",
-            sorted((h.ref, h.target) for h in o_ws._hyperlinks)
-            == sorted((h.ref, h.target) for h in n_ws._hyperlinks),
-        )
-        rep.add(
             f"conditional_formatting[{name}]",
             len(list(o_ws.conditional_formatting)) == len(list(n_ws.conditional_formatting)),
         )
@@ -145,6 +146,8 @@ def verify_output(
         # 4-9/13/14. full cell diff: only expected cells may differ, and they must hold exactly
         # the expected values; formatting must be unchanged everywhere.
         diffs = 0
+        link_diffs = 0
+        links = link_cells(columns)
         for r in range(1, exp_rows + 1):
             for c in range(1, exp_cols + 1):
                 o_cell, n_cell = o_ws.cell(row=r, column=c), n_ws.cell(row=r, column=c)
@@ -157,6 +160,18 @@ def verify_output(
                 if not ok:
                     diffs += 1
                     rep.mismatches.append(f"{name}!{n_cell.coordinate}: got {n_cell.value!r}, {what}")
+                if is_target and (r, c) in expected and c in links and r > columns.header_row:
+                    want = first_url(expected[(r, c)])
+                    link_ok = _link(n_cell) == want
+                    what_link = f"hyperlink {want!r}"
+                else:
+                    link_ok = _link(n_cell) == _link(o_cell)
+                    what_link = f"original hyperlink {_link(o_cell)!r}"
+                if not link_ok:
+                    link_diffs += 1
+                    rep.mismatches.append(
+                        f"{name}!{n_cell.coordinate}: hyperlink {_link(n_cell)!r}, {what_link}"
+                    )
                 if not (is_target and (r, c) in expected and not o_cell.has_style) and _style_sig(
                     o_cell
                 ) != _style_sig(n_cell):
@@ -164,6 +179,7 @@ def verify_output(
                     rep.mismatches.append(f"{name}!{n_cell.coordinate}: formatting changed")
         total_diffs += diffs
         rep.add(f"cell_values_and_formatting[{name}]", diffs == 0, f"{diffs} unexpected difference(s)")
+        rep.add(f"hyperlinks[{name}]", link_diffs == 0, f"{link_diffs} unexpected hyperlink difference(s)")
 
     # row identity: each processing record's source id is still in its original row
     ws = out[columns.sheet_name]

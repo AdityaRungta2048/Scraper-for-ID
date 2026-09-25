@@ -202,7 +202,9 @@ def row_detail(job_id: str, original_row: int, db: Session = Depends(get_db)) ->
 def _ensure_export(db: Session, settings: Settings, job: ProcessingJob) -> None:
     if job.status not in (JobStatus.COMPLETED.value, JobStatus.PARTIAL.value):
         raise HTTPException(409, f"The processed workbook is not available (job is {job.status}).")
-    if job.export_stale or not job.output_path or not Path(job.output_path).exists():
+    cols = job.columns_json or {}
+    missing_link_columns = cols.get("twitch_link") is None or cols.get("kick_link") is None
+    if job.export_stale or missing_link_columns or not job.output_path or not Path(job.output_path).exists():
         report = build_export(db, settings, job)
         if not report["ok"]:
             raise HTTPException(500, job.error_message or "Output verification failed.")
