@@ -158,27 +158,22 @@ NO_MATCH | REVIEW`, or `API_ERROR | RATE_LIMITED | TEMPORARY_ERROR |
 PROCESSING_ERROR` (retryable, never written as a remark), `SKIPPED_EMPTY`,
 `PRESERVED`.
 
-Kick source (`id_kick → id_twitch`):
+Destination ID: written only when the (final, after manual review) decision is MATCH —
+case A (source exists) or C (source missing, target verified by a back-link or a human).
 
-| Source | Target result | id_twitch | remarks |
-|---|---|---|---|
-| exists | MATCH | matched login | *(empty)* |
-| exists | REVIEW / NO_MATCH | *(empty)* | *(empty)* |
-| not found | target account verified (it explicitly links to that Kick id, or a human confirmed it) | matched login | `no kick id` |
-| not found | a same-name Twitch account exists but is not verified | *(empty)* | `no kick id` |
-| not found | no same-name Twitch account | *(empty)* | `no Id on both platforms` |
-| error anywhere | — | untouched | untouched (row = ERROR, retryable) |
+Remarks mirror the channel-link columns (a later product decision replacing the original
+per-case remark table), for both source platforms:
 
-Twitch source (`id_twitch → id_kick`):
+| Kick link present | Twitch link present | remarks |
+|---|---|---|
+| yes | yes | *(empty)* |
+| yes | no | `no twitch id found` |
+| no | yes | `no kick id` |
+| no | no | `no Id on both platforms` |
 
-| Source | Target result | id_kick | remarks |
-|---|---|---|---|
-| exists | MATCH | matched slug | *(empty)* |
-| exists | REVIEW / NO_MATCH | *(empty)* | `no kick id` |
-| not found | Kick account verified (explicit link to that Twitch id / human confirm) | matched slug | *(empty)* |
-| not found | same-name Kick channel exists, unverified | *(empty)* | `no kick id` |
-| not found | no same-name Kick channel | *(empty)* | `no Id on both platforms` |
-| error anywhere | — | untouched | untouched |
+A platform "has a link" when, for the source platform, the source account exists; for the
+other platform, there is a match, a review candidate or any candidate not rejected in
+review. Errors never touch the workbook.
 
 Other rules:
 * Empty source cell → row untouched (`SKIPPED_EMPTY`).

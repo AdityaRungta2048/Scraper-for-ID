@@ -3,6 +3,7 @@ import pytest
 from app.excel.state_machine import (
     REMARK_NO_BOTH,
     REMARK_NO_KICK,
+    REMARK_NO_TWITCH,
     StateMachineError,
     error_outcome,
     transition,
@@ -10,12 +11,14 @@ from app.excel.state_machine import (
 from app.models.tables import RowStatus
 
 
-def res(source_status, decision, target_status=None, matched="Target_1"):
+def res(source_status, decision, target_status=None, matched="Target_1", candidates=(), review=None):
     return {
         "source_status": source_status,
         "decision": decision,
         "target_status": target_status,
         "matched_id": matched if decision == "MATCH" else None,
+        "review_candidate": review,
+        "candidates": [{"username": c} for c in candidates],
     }
 
 
@@ -24,11 +27,12 @@ def res(source_status, decision, target_status=None, matched="Target_1"):
     ("resolution", "dest", "remark", "status", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, RowStatus.MATCH, "KICK_A"),
-        (res("EXISTS", "REVIEW"), None, None, RowStatus.REVIEW, "KICK_B"),
-        (res("EXISTS", "NO_MATCH"), None, None, RowStatus.NO_MATCH, "KICK_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, None, RowStatus.REVIEW, "KICK_B"),
+        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, None, RowStatus.NO_MATCH, "KICK_B"),
+        (res("EXISTS", "NO_MATCH"), None, REMARK_NO_TWITCH, RowStatus.NO_MATCH, "KICK_B"),
         (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", REMARK_NO_KICK, RowStatus.MATCH, "KICK_C"),
         (
-            res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"),
+            res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"),
             None,
             REMARK_NO_KICK,
             RowStatus.SOURCE_NOT_FOUND,
@@ -53,11 +57,12 @@ def test_kick_source_table(resolution, dest, remark, status, case):
     ("resolution", "dest", "remark", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, "TWITCH_A"),
-        (res("EXISTS", "REVIEW"), None, REMARK_NO_KICK, "TWITCH_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, None, "TWITCH_B"),
+        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, None, "TWITCH_B"),
         (res("EXISTS", "NO_MATCH"), None, REMARK_NO_KICK, "TWITCH_B"),
         (res("NOT_FOUND", "NO_MATCH", "NOT_FOUND"), None, REMARK_NO_BOTH, "TWITCH_C"),
-        (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"), None, REMARK_NO_KICK, "TWITCH_C2"),
-        (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", None, "TWITCH_C1"),
+        (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"), None, REMARK_NO_TWITCH, "TWITCH_C2"),
+        (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", REMARK_NO_TWITCH, "TWITCH_C1"),
     ],
 )
 def test_twitch_source_table(resolution, dest, remark, case):
@@ -65,8 +70,19 @@ def test_twitch_source_table(resolution, dest, remark, case):
     assert (out.destination, out.remarks, out.case) == (dest, remark, case)
 
 
+def test_remark_never_says_no_kick_id_when_a_kick_link_is_given():
+    # twitch source, twitch account exists, a (non-rejected) Kick account is linked
+    out = transition("twitch", res("EXISTS", "NO_MATCH", candidates=["somekick"]))
+    assert out.remarks is None
+    # ...but a candidate rejected in review is not linked, so no Kick id remains
+    rejected = res("EXISTS", "NO_MATCH")
+    rejected["candidates"] = [{"username": "somekick", "manual_verdict": "REJECTED"}]
+    assert transition("twitch", rejected).remarks == REMARK_NO_KICK
+
+
 def test_exact_remark_phrases():
     assert REMARK_NO_KICK == "no kick id"
+    assert REMARK_NO_TWITCH == "no twitch id found"
     assert REMARK_NO_BOTH == "no Id on both platforms"
 
 

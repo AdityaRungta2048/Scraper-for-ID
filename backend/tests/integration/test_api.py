@@ -185,4 +185,4 @@ def test_outdated_export_is_rebuilt_on_download(client, fake, sf, tmp_path):
         s.commit()
     ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
     assert ws["E2"].value == "https://www.twitch.tv/kosstochka"
-    assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["export_format"] == 2
+    assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["export_format"] == 3

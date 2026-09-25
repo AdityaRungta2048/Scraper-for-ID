@@ -194,17 +194,21 @@ The source is the **first** ID column; if column order and fill rates disagree t
 choose Kick or Twitch rather than guessing. `.xlsx` and `.xlsm` are supported (`.xls` must be
 re-saved as `.xlsx`).
 
-**Output rules** (exact phrases `no kick id` and `no Id on both platforms`):
+**Output rules.** The destination ID (`id_twitch` for a Kick sheet, `id_kick` for a Twitch
+sheet) is written **only for a confirmed match** (or one you confirm on the Review page).
 
-| Case | Kick source (`id_twitch`, `remarks`) | Twitch source (`id_kick`, `remarks`) |
+The remark follows the two link columns described below, using the exact phrases
+`no kick id`, `no twitch id found` and `no Id on both platforms`:
+
+| Kick link | Twitch link | remarks |
 |---|---|---|
-| source exists, confident match | matched login, empty | matched slug, empty |
-| source exists, no reliable match (incl. REVIEW) | empty, empty | empty, `no kick id` |
-| source missing, target account links back to it (or human-confirmed) | matched login, `no kick id` | matched slug, empty |
-| source missing, same-name target exists but unverified | empty, `no kick id` | empty, `no kick id` |
-| source missing, no same-name target | empty, `no Id on both platforms` | empty, `no Id on both platforms` |
-| API/network error | **row untouched**, reported as error, retryable | same |
-| empty source cell | row untouched | row untouched |
+| ✓ | ✓ | *(empty)* |
+| ✓ | — | `no twitch id found` |
+| — | ✓ | `no kick id` |
+| — | — | `no Id on both platforms` |
+
+API/network errors leave the row **untouched** (reported as an error, retryable), and an
+empty source cell is left untouched.
 
 **Channel-link columns.** Two columns are appended after your last used column,
 `twitch_id_link` and `kick_id_link` (reused if the sheet already has them), with **one

@@ -188,9 +188,11 @@ def build_twitch_world(f: FakePlatforms) -> list[Expect]:
         Expect("kosstochka", "Italy", None, "no kick id", "NO_MATCH", "twitch exists, no kick"),
         Expect("starwraith", "Spain", "starwraith", None, "MATCH", "exact username same person"),
         Expect("unknowntw", "Italy", None, "no Id on both platforms", "SOURCE_NOT_FOUND", "none"),
-        Expect("jimmyboyyy", "France", None, "no kick id", "*", "different person"),
-        Expect("fierik", "Italy", None, "no kick id", "*", "generic avatars"),
-        Expect("kal-75020yt", "France", None, "no kick id", "SOURCE_NOT_FOUND", "invalid twitch login"),
+        Expect("jimmyboyyy", "France", None, "no kick id", "*", "different person; no kick candidate found"),
+        Expect("fierik", "Italy", None, None, "*", "generic avatars; kick fierik linked"),
+        Expect(
+            "kal-75020yt", "France", None, "no twitch id found", "SOURCE_NOT_FOUND", "invalid twitch login"
+        ),
         Expect("juakynen", "Spain", "juaky", None, "MATCH", "explicit link"),
         Expect("nyaneila", "Germany", "nyaneilatv", None, "MATCH", "tv suffix + tiktok"),
         Expect(None, "Spain", None, None, "SKIPPED_EMPTY", "empty"),

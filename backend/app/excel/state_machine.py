@@ -12,8 +12,9 @@ from typing import Any
 from app.models.tables import RowStatus
 
 REMARK_NO_KICK = "no kick id"
+REMARK_NO_TWITCH = "no twitch id found"
 REMARK_NO_BOTH = "no Id on both platforms"
-APP_REMARKS = {REMARK_NO_KICK, REMARK_NO_BOTH}
+APP_REMARKS = {REMARK_NO_KICK, REMARK_NO_TWITCH, REMARK_NO_BOTH}
 EMPTY_PLACEHOLDERS = {"", "none", "null", "nan", "n/a", "na", "-", "--", "unknown", "not found"}
 
 
@@ -31,26 +32,51 @@ class RowOutcome:
     case: str  # e.g. "KICK_A" — for audit/debugging
 
 
-# (source_platform, source_status, decision, target_status) -> (case, dest?, remark)
-# dest? == True means "write the matched id", False means "leave destination empty".
-_TABLE: dict[tuple[str, str, str, str | None], tuple[str, bool, str | None]] = {
+# (source_platform, source_status, decision, target_status) -> (case, write the matched id?)
+_TABLE: dict[tuple[str, str, str, str | None], tuple[str, bool]] = {
     # ---- Kick source -------------------------------------------------------------
-    ("kick", "EXISTS", "MATCH", None): ("KICK_A", True, None),
-    ("kick", "EXISTS", "REVIEW", None): ("KICK_B", False, None),
-    ("kick", "EXISTS", "NO_MATCH", None): ("KICK_B", False, None),
-    ("kick", "NOT_FOUND", "MATCH", "VERIFIED"): ("KICK_C", True, REMARK_NO_KICK),
-    ("kick", "NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"): ("KICK_C2", False, REMARK_NO_KICK),
-    ("kick", "NOT_FOUND", "NO_MATCH", "EXISTS_UNVERIFIED"): ("KICK_C2", False, REMARK_NO_KICK),
-    ("kick", "NOT_FOUND", "NO_MATCH", "NOT_FOUND"): ("KICK_D", False, REMARK_NO_BOTH),
+    ("kick", "EXISTS", "MATCH", None): ("KICK_A", True),
+    ("kick", "EXISTS", "REVIEW", None): ("KICK_B", False),
+    ("kick", "EXISTS", "NO_MATCH", None): ("KICK_B", False),
+    ("kick", "NOT_FOUND", "MATCH", "VERIFIED"): ("KICK_C", True),
+    ("kick", "NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"): ("KICK_C2", False),
+    ("kick", "NOT_FOUND", "NO_MATCH", "EXISTS_UNVERIFIED"): ("KICK_C2", False),
+    ("kick", "NOT_FOUND", "NO_MATCH", "NOT_FOUND"): ("KICK_D", False),
     # ---- Twitch source -----------------------------------------------------------
-    ("twitch", "EXISTS", "MATCH", None): ("TWITCH_A", True, None),
-    ("twitch", "EXISTS", "REVIEW", None): ("TWITCH_B", False, REMARK_NO_KICK),
-    ("twitch", "EXISTS", "NO_MATCH", None): ("TWITCH_B", False, REMARK_NO_KICK),
-    ("twitch", "NOT_FOUND", "MATCH", "VERIFIED"): ("TWITCH_C1", True, None),
-    ("twitch", "NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"): ("TWITCH_C2", False, REMARK_NO_KICK),
-    ("twitch", "NOT_FOUND", "NO_MATCH", "EXISTS_UNVERIFIED"): ("TWITCH_C2", False, REMARK_NO_KICK),
-    ("twitch", "NOT_FOUND", "NO_MATCH", "NOT_FOUND"): ("TWITCH_C", False, REMARK_NO_BOTH),
+    ("twitch", "EXISTS", "MATCH", None): ("TWITCH_A", True),
+    ("twitch", "EXISTS", "REVIEW", None): ("TWITCH_B", False),
+    ("twitch", "EXISTS", "NO_MATCH", None): ("TWITCH_B", False),
+    ("twitch", "NOT_FOUND", "MATCH", "VERIFIED"): ("TWITCH_C1", True),
+    ("twitch", "NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED"): ("TWITCH_C2", False),
+    ("twitch", "NOT_FOUND", "NO_MATCH", "EXISTS_UNVERIFIED"): ("TWITCH_C2", False),
+    ("twitch", "NOT_FOUND", "NO_MATCH", "NOT_FOUND"): ("TWITCH_C", False),
 }
+
+
+def link_presence(source_platform: str, resolution: dict[str, Any]) -> dict[str, bool]:
+    """Which platforms get a channel link (same rule as the link columns).
+
+    Source platform: the source account exists. Other platform: there is a best account
+    to link — the match, the review candidate, or any candidate not rejected in review.
+    """
+    target = "twitch" if source_platform == "kick" else "kick"
+    has_target = bool(resolution.get("matched_id") or resolution.get("review_candidate")) or any(
+        c.get("username") and c.get("manual_verdict") != "REJECTED"
+        for c in resolution.get("candidates") or []
+    )
+    return {source_platform: resolution.get("source_status") == "EXISTS", target: has_target}
+
+
+def remark_for_links(links: dict[str, bool]) -> str | None:
+    """Remarks mirror the link columns: never say "no kick id" when a Kick link is given."""
+    has_kick, has_twitch = links.get("kick", False), links.get("twitch", False)
+    if has_kick and has_twitch:
+        return None
+    if has_kick:
+        return REMARK_NO_TWITCH
+    if has_twitch:
+        return REMARK_NO_KICK
+    return REMARK_NO_BOTH
 
 
 class StateMachineError(ValueError):
@@ -70,7 +96,8 @@ def transition(
     key = (source_platform, str(source_status), str(decision), target_status)
     if key not in _TABLE:
         raise StateMachineError(f"undefined state {key}")
-    case, write_id, remark = _TABLE[key]
+    case, write_id = _TABLE[key]
+    remark = remark_for_links(link_presence(source_platform, resolution))
 
     matched = resolution.get("matched_id")
     if write_id and not matched:

@@ -15,7 +15,7 @@ from app.config import Settings
 from app.excel.exporter import CellWrite, ExportError, export_processed, output_filename
 from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows, upgrade_columns
 from app.excel.review_report import review_filename, write_review_report
-from app.excel.state_machine import transition
+from app.excel.state_machine import StateMachineError, transition
 from app.excel.verifier import verify_output
 from app.logging_setup import get_logger
 from app.matching.normalize import normalize_username
@@ -29,7 +29,7 @@ from app.version import MATCHING_ENGINE_VERSION
 
 log = get_logger("jobs")
 # Bump when the processed-workbook layout changes: existing jobs are re-exported on download.
-EXPORT_FORMAT_VERSION = 2
+EXPORT_FORMAT_VERSION = 3
 NORMALIZERS: dict[str, type[PlatformAdapter]] = {"twitch": TwitchAdapter, "kick": KickAdapter}
 
 
@@ -203,6 +203,22 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
         ).scalars()
     )
     verdicts = manual_verdicts(session, platform)
+    # Re-derive every resolved row with the current output rules (e.g. remark wording) from its
+    # stored evidence — no platform calls — so re-downloads of older jobs follow the same rules.
+    for r in rows:
+        if r.evidence_json and RowStatus(r.status).is_final and r.status != RowStatus.SKIPPED_EMPTY.value:
+            resolution = {k: v for k, v in r.evidence_json.items() if k != "state_case"}
+            try:
+                apply_resolution_to_row(
+                    r,
+                    platform,
+                    resolution,
+                    verdicts.get(verdict_key(r), {}),
+                    settings.existing_destination_policy,
+                )
+            except StateMachineError:  # incomplete stored evidence: keep the stored outputs
+                log.warning("row_rederive_skipped", job_id=job.id, original_row=r.original_row)
+    recompute_counters(session, job)
     writes = []
     for r in rows:
         if not RowStatus(r.status).is_final:
