@@ -134,8 +134,8 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
 
     return [
         Expect("starwraith", "Spain", "StarWraith", None, "MATCH", "exact username same person"),
-        # matching rule: an exact same channel name is the same creator
-        Expect("alex123", "France", "alex123", None, "MATCH", "exact username"),
+        # same name, but different language/country -> sent to review, nothing written
+        Expect("alex123", "France", None, "no twitch id found", "REVIEW", "exact username different people"),
         Expect("nikkilve", "Germany", "NikkLive_", None, "MATCH", "similar username same person"),
         Expect("fekah", "France", None, "no twitch id found", "*", "similar usernames different people"),
         Expect("the-real-abc", "France", "ABCOfficialTV", None, "MATCH", "different usernames same person"),
@@ -171,7 +171,7 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
         Expect("marco", "Italy", None, "no twitch id found", "*", "live suffix different person"),
         Expect("davidsantos-", "Spain", "davidsantos_oficial", None, "MATCH", "official suffix"),
         Expect("twinz", "France", "twinz", None, "MATCH", "same picture twice; exact name wins"),
-        Expect("conflicted", "France", "conflicted", None, "MATCH", "exact name despite a conflicting link"),
+        Expect("conflicted", "France", None, "no twitch id found", "REVIEW", "exact name, links elsewhere"),
         Expect("abc", "France", None, "no twitch id found", "*", "abc vs abcgaming"),
         Expect("ratelimited", "Spain", "RateLimited", None, "MATCH", "rate limit recovered"),
         Expect("timeoutguy", "Spain", "timeoutguy", None, "MATCH", "timeout recovered"),

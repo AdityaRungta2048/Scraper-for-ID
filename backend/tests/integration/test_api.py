@@ -77,34 +77,37 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     assert rr.status_code == 200 and "my_streamers_review.xlsx" in rr.headers["content-disposition"]
     assert set(load_workbook(io.BytesIO(rr.content)).sheetnames) == {"Summary", "Rows", "Candidates"}
 
-    # --- the matching rules leave nothing "nearest"/unconfirmed, so the review queue is empty
-    assert client.get(f"/api/jobs/{job['id']}/reviews").json() == []
-    # --- manual verdicts still override: confirm a discovered candidate, reject a rule match
-    by_src = {r["source_value"]: r for r in rows["items"]}
-    fekah_row = by_src["fekah"]["original_row"]
+    # --- review queue: rule hits that something contradicts are never written, only reviewed
+    items = client.get(f"/api/jobs/{job['id']}/reviews").json()
+    by_src = {i["source_value"]: i for i in items}
+    assert {"alex123", "conflicted"} <= set(by_src)
+    alex_row = by_src["alex123"]["original_row"]
+    assert by_src["alex123"]["candidate"]["username"] == "alex123"
+    assert ws.cell(row=alex_row, column=3).value is None  # not written while in review
+
     bad = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": fekah_row, "verdict": "CONFIRM", "target_username": "invented_name"},
+        json={"original_row": alex_row, "verdict": "CONFIRM", "target_username": "invented_name"},
     )
     assert bad.status_code == 400  # never accept an id the engine did not discover
 
     ok = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": fekah_row, "verdict": "CONFIRM", "target_username": "fekah_"},
+        json={"original_row": alex_row, "verdict": "CONFIRM", "target_username": "alex123"},
     )
     assert ok.status_code == 200, ok.text
-    alex_row = by_src["alex123"]["original_row"]
+    conf_row = by_src["conflicted"]["original_row"]
     rej = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": alex_row, "verdict": "REJECT", "target_username": "alex123"},
+        json={"original_row": conf_row, "verdict": "REJECT", "target_username": "conflicted"},
     )
     assert rej.status_code == 200
 
     job2 = client.get(f"/api/jobs/{job['id']}").json()
-    assert job2["match_count"] == job["match_count"] and job2["export_stale"]
+    assert job2["match_count"] == job["match_count"] + 1 and job2["export_stale"]
     ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
-    assert ws.cell(row=fekah_row, column=3).value == "Fekah_"
-    assert ws.cell(row=alex_row, column=3).value is None
+    assert ws.cell(row=alex_row, column=3).value == "alex123"
+    assert ws.cell(row=conf_row, column=3).value is None
     assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
 
 

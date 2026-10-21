@@ -19,9 +19,10 @@ from app.logging_setup import get_logger
 from app.matching.candidates import CandidateGenerator
 from app.matching.decision import CandidateEvaluation, Decision, aggregate
 from app.matching.names import UsernameMatcher
-from app.matching.normalize import normalize_username
+from app.matching.normalize import fold_accents, normalize_username
 from app.matching.signals import Family, Signal, Strength
 from app.matching.social import canonical_platform_handle, extract_identities
+from app.matching.text import COUNTRY_LANGUAGES, GENERIC_CATEGORIES, normalize_language
 from app.matching.verifier import IdentityVerifier
 from app.platforms.base import PlatformAdapter, Profile, dedupe
 from app.services.stores import ProfileStore
@@ -324,14 +325,25 @@ def _display_from_candidate(c: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------------------
-# Matching rules (applied last, to every resolution and every platform pair):
-#   * source account exists  -> the target account is the same creator ONLY if it has the
-#     exact same name, the same profile picture (judged on the picture's subject, not its
-#     background), or exactly the same bio; otherwise there is no target account.
-#   * source account missing -> a same-name target account is taken as the creator's account.
-# No "nearest possible" fallback: a target account is either confirmed or not written at all.
+# Matching rules (applied last, to every resolution and every platform pair).
+#
+# Source account exists. A candidate on the other platform is a "rule hit" when it has
+#   * the exact same channel name, or
+#   * the same profile picture (judged on the picture's subject, not its background), or
+#   * exactly the same bio.
+# A rule hit is a MATCH only if nothing contradicts it: a different (specific) category,
+# a different broadcast language, a language that does not fit the sheet's country,
+# different profile pictures, or a link to a different account. Two rule hits together
+# (e.g. same name AND same picture) outweigh a category/language/country difference, but
+# never a link to a different account. Contradicted hits, two equally good accounts, and
+# strong near misses without a rule hit (e.g. the same Instagram) go to REVIEW: nothing is
+# written to the sheet until a human confirms. Everything else: no account.
+#
+# Source account missing. A same-name account on the other platform is the MATCH, unless
+# its language does not fit the sheet's country (then REVIEW).
 # ---------------------------------------------------------------------------------------
 _NAME_SEPARATORS = re.compile(r"[\s._-]+")
+RULES = ("exact same name", "same profile picture", "exact same bio")
 
 
 def _same_name(a: Any, b: Any) -> bool:
@@ -344,20 +356,85 @@ def _same_bio(a: Any, b: Any) -> bool:
     return bool(a) and a == b
 
 
-def rule_match(source: dict[str, Any], candidate: dict[str, Any]) -> str | None:
-    """Which rule makes ``candidate`` the same creator as ``source`` (None = not the same)."""
+def _signal_strengths(candidate: dict[str, Any]) -> dict[str, str]:
+    return {str(s.get("name")): str(s.get("strength")) for s in candidate.get("signals") or []}
+
+
+def rule_hits(source: dict[str, Any], candidate: dict[str, Any]) -> list[str]:
+    """Every rule that makes ``candidate`` look like the same creator as ``source``."""
+    hits = []
     # channel names (handles); "foo_bar" and Kick's slug "foo-bar" are the same name
     if _same_name(source.get("username"), candidate.get("username")):
-        return "exact same name"
-    image = next((s for s in candidate.get("signals") or [] if s.get("name") == "profile_image"), None)
+        hits.append(RULES[0])
     # STRONG = same picture after border/background trimming and not a generic/default image
-    if image and image.get("strength") == Strength.STRONG.value:
-        return "same profile picture"
+    if _signal_strengths(candidate).get("profile_image") == Strength.STRONG.value:
+        hits.append(RULES[1])
     if _same_bio(source.get("description"), candidate.get("description")) or _same_bio(
         source.get("extra_bio"), candidate.get("description")
     ):
-        return "exact same bio"
-    return None
+        hits.append(RULES[2])
+    return hits
+
+
+def rule_match(source: dict[str, Any], candidate: dict[str, Any]) -> str | None:
+    hits = rule_hits(source, candidate)
+    return hits[0] if hits else None
+
+
+def contradictions(
+    source: dict[str, Any], candidate: dict[str, Any], country: str | None, hits: list[str]
+) -> list[str]:
+    """Category / language / country / picture / link evidence against ``candidate``."""
+    out: list[str] = []
+    ca = str(source.get("category") or "").strip().casefold()
+    cb = str(candidate.get("category") or "").strip().casefold()
+    if ca and cb and ca != cb and ca not in GENERIC_CATEGORIES and cb not in GENERIC_CATEGORIES:
+        out.append(f"different category ({source.get('category')} / {candidate.get('category')})")
+    la, lb = normalize_language(source.get("language")), normalize_language(candidate.get("language"))
+    if la and lb and la != lb:
+        out.append(f"different language ({la} / {lb})")
+    langs = COUNTRY_LANGUAGES.get(fold_accents(country or "").casefold().strip())
+    if langs and lb and lb not in langs:
+        out.append(f"streams in {lb}, but the sheet says {country}")
+    strengths = _signal_strengths(candidate)
+    if RULES[1] not in hits and strengths.get("profile_image") == Strength.NEGATIVE.value:
+        out.append("different profile pictures")
+    if strengths.get("cross_link") == Strength.CONFLICT.value:
+        out.append("links to a different account")
+    return out
+
+
+def _decide(res: dict[str, Any], live: list[dict[str, Any]]) -> tuple[str, dict[str, Any] | None, str]:
+    """(decision, candidate, reason) for a source account that exists."""
+    source = res.get("source_profile") or {}
+    country = res.get("country")
+    matches: list[tuple[dict[str, Any], list[str]]] = []
+    doubtful: list[tuple[dict[str, Any], list[str], list[str]]] = []
+    for c in live:
+        hits = rule_hits(source, c)
+        if not hits:
+            continue
+        problems = contradictions(source, c, country, hits)
+        linked_elsewhere = "links to a different account" in problems
+        if not linked_elsewhere and (len(hits) >= 2 or not problems):
+            matches.append((c, hits))
+        else:
+            doubtful.append((c, hits, problems))
+    matches.sort(key=lambda m: (-len(m[1]), RULES.index(m[1][0])))
+    if len(matches) == 1 or (len(matches) > 1 and len(matches[0][1]) > len(matches[1][1])):
+        c, hits = matches[0]
+        return "MATCH", c, " + ".join(hits)
+    if matches:
+        names = ", ".join(m[0]["username"] for m in matches[:3])
+        return "REVIEW", matches[0][0], f"several accounts fit equally well ({names}); please choose"
+    if doubtful:
+        c, hits, problems = max(doubtful, key=lambda d: len(d[1]))
+        return "REVIEW", c, f"{' + '.join(hits)}, but {'; '.join(problems)}"
+    near = [c for c in live if c.get("decision") in ("MATCH", "REVIEW")]
+    if near:
+        c = max(near, key=lambda c: c.get("confidence") or 0.0)
+        return "REVIEW", c, f"near miss (no exact name, picture or bio): {c.get('reason') or ''}".strip()
+    return "NO_MATCH", None, ""
 
 
 def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
@@ -368,28 +445,38 @@ def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
     ):
         return resolution
     res = dict(resolution)
-    cands = res.get("candidates") or []
+    cands = [dict(c) for c in res.get("candidates") or []]
+    res["candidates"] = cands
     live = [c for c in cands if c.get("username") and c.get("manual_verdict") != "REJECTED"]
     src_pf, tgt_pf = res.get("source_platform"), res.get("target_platform")
-    best: dict[str, Any] | None = None
     if res.get("source_status") == "NOT_FOUND":
         best = live[0] if live else None
-        why = f"source {src_pf} account does not exist; same-name {tgt_pf} account found"
-        res["target_status"] = "VERIFIED" if best else ("EXISTS_UNVERIFIED" if cands else "NOT_FOUND")
+        problems = contradictions({}, best, res.get("country"), [RULES[0]]) if best else []
+        decision = ("REVIEW" if problems else "MATCH") if best else "NO_MATCH"
+        why = f"source {src_pf} account does not exist; same-name {tgt_pf} account found" + (
+            f", but {'; '.join(problems)}" if problems else ""
+        )
+        res["target_status"] = (
+            "VERIFIED" if decision == "MATCH" else ("EXISTS_UNVERIFIED" if cands else "NOT_FOUND")
+        )
     else:
-        source = res.get("source_profile") or {}
-        hits = [(c, rule_match(source, c)) for c in live]
-        order = ["exact same name", "same profile picture", "exact same bio"]
-        hits = sorted((h for h in hits if h[1]), key=lambda h: order.index(h[1]))
-        if hits:
-            best, why = hits[0][0], hits[0][1]
-    if best is not None:
+        decision, best, why = _decide(res, live)
+    if decision == "MATCH" and best is not None:
         res.update(
             decision="MATCH",
             matched_username=best["username"],
             matched_id=_display_from_candidate(best),
             review_candidate=None,
             reason=f"Matched {tgt_pf}/{best['username']}: {why}.",
+        )
+    elif decision == "REVIEW" and best is not None:
+        best["decision"] = "REVIEW"  # shown on the Review page
+        res.update(
+            decision="REVIEW",
+            matched_username=None,
+            matched_id=None,
+            review_candidate=best["username"],
+            reason=f"Needs review - {tgt_pf}/{best['username']}: {why}.",
         )
     else:
         res.update(

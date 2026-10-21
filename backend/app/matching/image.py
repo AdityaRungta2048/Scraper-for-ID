@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -146,6 +147,17 @@ class ImageFeatureStore(Protocol):
     def accounts_sharing_hash(self, phash: str, exclude: set[tuple[str, str]]) -> int: ...
 
 
+def count_other_accounts(owners: Iterable[tuple[str, str]], exclude: set[tuple[str, str]]) -> int:
+    """How many *other* creators use an image. Counted by channel name: the same creator's own
+    channels on other platforms (same name) never make their picture look generic."""
+    skip = {_name_key(u) for _, u in exclude}
+    return len({_name_key(u) for _, u in owners if u} - skip - {""})
+
+
+def _name_key(username: str) -> str:
+    return re.sub(r"[\s._-]+", "", str(username).lower())
+
+
 class InMemoryFeatureStore:
     def __init__(self) -> None:
         self._by_url: dict[str, dict[str, Any] | None] = {}
@@ -162,7 +174,7 @@ class InMemoryFeatureStore:
             self._owners.setdefault(features["variants"]["full"]["p"], set()).add((platform, username))
 
     def accounts_sharing_hash(self, phash: str, exclude: set[tuple[str, str]]) -> int:
-        return len(self._owners.get(phash, set()) - exclude)
+        return count_other_accounts(self._owners.get(phash, set()), exclude)
 
 
 @dataclass

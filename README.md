@@ -204,7 +204,23 @@ same creator **only** if it has
 
 Otherwise the row gets no other-platform account at all (there is no "nearest possible"
 channel any more). When the source account does **not** exist, a same-name account on the
-other platform is taken as the creator's channel.
+other platform is taken as the creator's channel (sent to Review if its language doesn't fit
+the sheet's country).
+
+**Before a match is written, the account is checked against category, language and country.**
+A match from one rule is sent to **Review** instead (nothing written) when the two channels
+stream a different specific category, stream in a different language, the candidate streams
+in a language that doesn't fit the sheet's country, the profile pictures are clearly different,
+or the candidate links to a different account. A match on two rules (e.g. same name **and**
+same picture) is written despite a category/language/country difference, but never when it
+links to a different account. Popular categories (Just Chatting, Fortnite, GTA V, ...) never
+count against a match, because streamers switch between them.
+
+Also sent to **Review**: two accounts that fit equally well, and near misses that pass no rule
+but have strong evidence (same Instagram/YouTube, a link to the source channel, a very similar
+picture). Review rows are never written to the sheet: the ID and link stay empty and the
+remark says the account was not found, until you confirm one on the Review page (then the ID
+is written on the next download).
 
 **Output rules.** The destination ID (`id_twitch` for a Kick sheet, `id_kick` for a Twitch
 sheet) is written for a match under the rules above (or one you confirm on the Review page).
@@ -301,9 +317,8 @@ uncorroborated evidence → REVIEW. Otherwise NO_MATCH.
 
 ## 15. Review process
 
-With the matching rules above every row is decided automatically, so the Review queue is
-normally empty. Rows marked REVIEW (from earlier versions) appear on the job's
-**Review** page: source vs candidate profile side by side (avatar, names, bio, category, language,
+Rows the matching rules can't decide safely (contradicted matches, ties, near misses; see
+above) appear on the job's **Review** page: source vs candidate profile side by side (avatar, names, bio, category, language,
 social links, URLs), the evidence scores, each signal with its points and explanation.
 
 * **Confirm Match** writes the candidate's ID into the processed workbook (for every row with the

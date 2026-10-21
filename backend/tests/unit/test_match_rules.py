@@ -3,14 +3,20 @@
 from app.services.resolver import apply_match_rules, rule_match
 
 
-def cand(username, platform="kick", display=None, bio=None, image=None):
-    signals = [{"name": "profile_image", "strength": image}] if image else []
+def cand(
+    username, platform="kick", display=None, bio=None, image=None, category=None, language=None, signals=None
+):
+    sig = dict(signals or {})
+    if image:
+        sig["profile_image"] = image
     return {
         "platform": platform,
         "username": username,
         "display_name": display,
         "description": bio,
-        "signals": signals,
+        "category": category,
+        "language": language,
+        "signals": [{"name": n, "strength": v} for n, v in sig.items()],
     }
 
 
@@ -62,3 +68,46 @@ def test_human_decisions_and_incomplete_evidence_are_left_alone():
     rejected = resolution("EXISTS", [{**cand("foo-bar"), "manual_verdict": "REJECTED"}])
     assert apply_match_rules(rejected)["decision"] == "NO_MATCH"
     assert apply_match_rules({"source_status": "EXISTS"}) == {"source_status": "EXISTS"}
+
+
+def test_context_contradiction_sends_a_single_rule_hit_to_review():
+    res = resolution("EXISTS", [cand("foo-bar", language="pt")])
+    res["source_profile"]["language"] = "fr"
+    out = apply_match_rules(res)
+    assert (out["decision"], out["matched_id"], out["review_candidate"]) == ("REVIEW", None, "foo-bar")
+    assert "different language" in out["reason"]
+    country = resolution("EXISTS", [cand("foo-bar", language="pt")])
+    country["country"] = "France"
+    assert apply_match_rules(country)["decision"] == "REVIEW"
+    category = resolution("EXISTS", [cand("foo-bar", category="Stardew Valley")])
+    category["source_profile"]["category"] = "Elden Ring"
+    assert apply_match_rules(category)["decision"] == "REVIEW"
+    generic = resolution("EXISTS", [cand("foo-bar", category="Just Chatting")])
+    generic["source_profile"]["category"] = "Fortnite"
+    assert apply_match_rules(generic)["decision"] == "MATCH"  # a generic category says nothing
+
+
+def test_two_rule_hits_outweigh_context_but_not_a_link_elsewhere():
+    res = resolution("EXISTS", [cand("foo-bar", language="pt", image="strong")])
+    res["source_profile"]["language"] = "fr"
+    assert apply_match_rules(res)["decision"] == "MATCH"
+    linked = resolution("EXISTS", [cand("foo-bar", image="strong", signals={"cross_link": "conflict"})])
+    assert apply_match_rules(linked)["decision"] == "REVIEW"
+    pictures = resolution("EXISTS", [cand("foo-bar", signals={"profile_image": "negative"})])
+    assert apply_match_rules(pictures)["decision"] == "REVIEW"
+
+
+def test_ties_and_near_misses_go_to_review():
+    tie = apply_match_rules(resolution("EXISTS", [cand("a1", image="strong"), cand("a2", image="strong")]))
+    assert tie["decision"] == "REVIEW" and "several accounts" in tie["reason"]
+    near = resolution("EXISTS", [{**cand("foobar_official"), "decision": "REVIEW", "confidence": 70.0}])
+    out = apply_match_rules(near)
+    assert (out["decision"], out["review_candidate"]) == ("REVIEW", "foobar_official")
+    assert out["candidates"][0]["decision"] == "REVIEW"  # listed on the Review page
+
+
+def test_source_missing_same_name_with_wrong_language_for_country_is_reviewed():
+    res = resolution("NOT_FOUND", [cand("foo-bar", language="en")])
+    res["country"] = "Spain"
+    out = apply_match_rules(res)
+    assert (out["decision"], out["target_status"], out["matched_id"]) == ("REVIEW", "EXISTS_UNVERIFIED", None)

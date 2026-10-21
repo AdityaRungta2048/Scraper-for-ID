@@ -162,7 +162,12 @@ Matching rules (applied last, `apply_match_rules`): source exists -> a candidate
 same creator only with the exact same channel name (separators `_ - .` equal), the same
 profile picture (STRONG image signal: border-trimmed, centre-cropped and outline hashes, so a
 different background colour does not matter; generic images excluded) or exactly the same
-bio; source missing -> a same-name target account is the match. No REVIEW/"nearest" output.
+bio. A single rule hit is a MATCH only without contradictions (different specific category,
+different language, language not fitting the sheet's country, NEGATIVE image signal, link to
+another account); two rule hits outweigh category/language/country but not a link conflict.
+Contradicted hits, ties and strong engine near misses -> REVIEW (never written to the sheet).
+Source missing -> a same-name target account is the match (REVIEW if its language does not fit
+the sheet's country). No "nearest" output.
 
 Destination ID: written only when the (final, after manual review) decision is MATCH —
 case A (source exists) or C (source missing, same-name target account).

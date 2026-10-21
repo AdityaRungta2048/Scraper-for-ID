@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.cache.service import as_utc
+from app.matching.image import count_other_accounts
 from app.matching.social import SocialIdentity
 from app.models import ImageHashRecord, PlatformAccount, SocialLink
 from app.platforms.base import Profile
@@ -120,4 +121,4 @@ class DbImageFeatureStore:
                     ImageHashRecord.phash == phash
                 )
             ).all()
-        return len({(p, u) for p, u in rows if p and u} - exclude)
+        return count_other_accounts(((p, u) for p, u in rows if p and u), exclude)
