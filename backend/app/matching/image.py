@@ -21,7 +21,7 @@ from typing import Any, Protocol
 
 import imagehash
 import numpy as np
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from app.matching.config import ScoringConfig
 from app.matching.signals import Family, Signal, Strength, unavailable
@@ -99,7 +99,14 @@ def compute_features(data: bytes) -> dict[str, Any]:
     raw = _load(data)
     trimmed = _trim_border(raw)
     full = _square(raw, 1.0)
-    variants = {"full": _hashes(full), "center": _hashes(_square(raw, 0.8))}
+    variants = {
+        "full": _hashes(full),
+        "center": _hashes(_square(raw, 0.8)),
+        # the character's outline only: the same character on a different background colour
+        "subject": _hashes(
+            ImageOps.autocontrast(_square(raw, 0.8).convert("L").filter(ImageFilter.FIND_EDGES))
+        ),
+    }
     if trimmed.size != raw.size:
         variants["trim"] = _hashes(_square(trimmed, 1.0))
         variants["trim_center"] = _hashes(_square(trimmed, 0.8))
@@ -118,8 +125,10 @@ def hash_similarity(fa: dict[str, Any], fb: dict[str, Any]) -> float:
     if fa.get("sha256") and fa.get("sha256") == fb.get("sha256"):
         return 1.0
     best = 0.0
-    for va in fa["variants"].values():
-        for vb in fb["variants"].values():
+    for na, va in fa["variants"].items():
+        for nb, vb in fb["variants"].items():
+            if (na == "subject") != (nb == "subject"):  # outlines only compare with outlines
+                continue
             dist = sum(w * _hamming(va[k], vb[k]) for k, w in _HASH_WEIGHTS.items()) / 64.0
             best = max(best, 1.0 - dist)
     return best

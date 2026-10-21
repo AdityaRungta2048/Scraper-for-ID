@@ -10,6 +10,7 @@ resolutions never bake in human decisions.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -98,6 +99,7 @@ class IdentityResolver:
             result = await self._resolve_source_exists(
                 base, source, country, src_adapter, tgt_adapter, rejected
             )
+        result = apply_match_rules(result)
         if not rejected:
             self.cache.set(
                 "resolution",
@@ -319,3 +321,86 @@ def _display_from_candidate(c: dict[str, Any]) -> str:
     ):
         return str(c["display_name"])
     return str(c["username"])
+
+
+# ---------------------------------------------------------------------------------------
+# Matching rules (applied last, to every resolution and every platform pair):
+#   * source account exists  -> the target account is the same creator ONLY if it has the
+#     exact same name, the same profile picture (judged on the picture's subject, not its
+#     background), or exactly the same bio; otherwise there is no target account.
+#   * source account missing -> a same-name target account is taken as the creator's account.
+# No "nearest possible" fallback: a target account is either confirmed or not written at all.
+# ---------------------------------------------------------------------------------------
+_NAME_SEPARATORS = re.compile(r"[\s._-]+")
+
+
+def _same_name(a: Any, b: Any) -> bool:
+    a, b = str(a or "").strip().lower(), str(b or "").strip().lower()
+    return bool(a) and _NAME_SEPARATORS.sub("_", a) == _NAME_SEPARATORS.sub("_", b)
+
+
+def _same_bio(a: Any, b: Any) -> bool:
+    a, b = " ".join(str(a or "").split()), " ".join(str(b or "").split())
+    return bool(a) and a == b
+
+
+def rule_match(source: dict[str, Any], candidate: dict[str, Any]) -> str | None:
+    """Which rule makes ``candidate`` the same creator as ``source`` (None = not the same)."""
+    # channel names (handles); "foo_bar" and Kick's slug "foo-bar" are the same name
+    if _same_name(source.get("username"), candidate.get("username")):
+        return "exact same name"
+    image = next((s for s in candidate.get("signals") or [] if s.get("name") == "profile_image"), None)
+    # STRONG = same picture after border/background trimming and not a generic/default image
+    if image and image.get("strength") == Strength.STRONG.value:
+        return "same profile picture"
+    if _same_bio(source.get("description"), candidate.get("description")) or _same_bio(
+        source.get("extra_bio"), candidate.get("description")
+    ):
+        return "exact same bio"
+    return None
+
+
+def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
+    """Final decision from the matching rules above. A human confirmation always stands;
+    incomplete stored evidence (no engine decision) is left for the caller to reject."""
+    if resolution.get("decision") is None or (
+        resolution.get("manual") and resolution.get("decision") == "MATCH"
+    ):
+        return resolution
+    res = dict(resolution)
+    cands = res.get("candidates") or []
+    live = [c for c in cands if c.get("username") and c.get("manual_verdict") != "REJECTED"]
+    src_pf, tgt_pf = res.get("source_platform"), res.get("target_platform")
+    best: dict[str, Any] | None = None
+    if res.get("source_status") == "NOT_FOUND":
+        best = live[0] if live else None
+        why = f"source {src_pf} account does not exist; same-name {tgt_pf} account found"
+        res["target_status"] = "VERIFIED" if best else ("EXISTS_UNVERIFIED" if cands else "NOT_FOUND")
+    else:
+        source = res.get("source_profile") or {}
+        hits = [(c, rule_match(source, c)) for c in live]
+        order = ["exact same name", "same profile picture", "exact same bio"]
+        hits = sorted((h for h in hits if h[1]), key=lambda h: order.index(h[1]))
+        if hits:
+            best, why = hits[0][0], hits[0][1]
+    if best is not None:
+        res.update(
+            decision="MATCH",
+            matched_username=best["username"],
+            matched_id=_display_from_candidate(best),
+            review_candidate=None,
+            reason=f"Matched {tgt_pf}/{best['username']}: {why}.",
+        )
+    else:
+        res.update(
+            decision="NO_MATCH",
+            matched_username=None,
+            matched_id=None,
+            review_candidate=None,
+            reason=(
+                f"No {tgt_pf} account with the exact same name, profile picture or bio."
+                if res.get("source_status") == "EXISTS"
+                else f"Source {src_pf} account does not exist and no same-name {tgt_pf} account exists."
+            ),
+        )
+    return res

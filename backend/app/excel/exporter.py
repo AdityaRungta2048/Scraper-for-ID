@@ -12,15 +12,36 @@ import tempfile
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.excel.importer import ColumnMap
+from app.excel.state_machine import is_blank
 
 LINK_FONT = Font(color="0563C1", underline="single")
+# yellow fill earlier versions put on unconfirmed ("nearest") suggestions in the ID column
+STALE_HIGHLIGHT = "FFFFEB9C"
+
+
+def stale_highlights(ws: Any, col: int, header_row: int) -> set[tuple[int, int]]:
+    """ID cells that already hold an ID but still carry the yellow suggestion highlight.
+    Those rows are left untouched except that the highlight is removed."""
+    out: set[tuple[int, int]] = set()
+    for r in range(header_row + 1, ws.max_row + 1):
+        cell = ws.cell(row=r, column=col)
+        fill = cell.fill
+        if (
+            fill is not None
+            and fill.fill_type == "solid"
+            and str(fill.fgColor.rgb).upper() == STALE_HIGHLIGHT
+            and not is_blank(cell.value)
+        ):
+            out.add((r, col))
+    return out
 
 
 class ExportError(RuntimeError):
@@ -100,6 +121,8 @@ def export_processed(
     if columns.sheet_name not in wb.sheetnames:
         raise ExportError(f"worksheet '{columns.sheet_name}' missing from the original workbook")
     ws = wb[columns.sheet_name]
+    for row, col in stale_highlights(ws, columns.dest_col(source_platform), columns.header_row):
+        ws.cell(row=row, column=col).fill = PatternFill(fill_type=None)
     for (row, col), value in expected.items():
         cell = ws.cell(row=row, column=col)
         if isinstance(cell, MergedCell):

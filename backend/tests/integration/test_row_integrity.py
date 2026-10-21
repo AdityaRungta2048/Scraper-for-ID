@@ -50,7 +50,16 @@ class OrchestratedResolver:
             "review_candidate": None,
             "confidence": 99.0,
             "reason": "test",
-            "candidates": [],
+            "source_profile": {"username": value.lower()},
+            # same profile picture -> a match under the matching rules
+            "candidates": [
+                {
+                    "platform": "twitch",
+                    "username": f"{value.lower()}_tw",
+                    "display_name": f"{value}_TW",
+                    "signals": [{"name": "profile_image", "strength": "strong"}],
+                }
+            ],
             "from_cache": True,
         }
 

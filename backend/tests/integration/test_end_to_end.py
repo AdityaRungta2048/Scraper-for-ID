@@ -213,12 +213,12 @@ async def test_channel_link_columns(fake, sf, tmp_path):
         for col in (5, 6):
             v = ws.cell(row=i, column=col).value
             assert v is None or ("\n" not in v and " " not in v), (i, v)
-    # review row: the review candidate; the ID column stays empty
-    assert cell("twinz", 5).value == "https://www.twitch.tv/twinz" and cell("twinz", 3).value is None
-    # no match: the closest candidate (same name first) is linked, the ID stays empty
-    assert cell("alex123", 5).value == "https://www.twitch.tv/alex123" and cell("alex123", 3).value is None
-    # source missing: the same-name account is linked; no source link
+    # no match: no other-platform link at all (never a "nearest" channel), the ID stays empty
+    assert cell("fekah", 5).value is None and cell("fekah", 3).value is None
+    assert cell("fekah", 6).value == "https://kick.com/fekah"
+    # source missing: the same-name account is linked and written; no source link
     assert cell("ghostkick", 5).value == "https://www.twitch.tv/ghostkick"
+    assert cell("ghostkick", 3).value == "ghostkick"
     assert cell("ghostkick", 6).value is None
     # nothing found / API error rows get no links
     assert cell("unknownabc", 5).value is None and cell("flaky", 5).value is None
@@ -254,3 +254,29 @@ async def test_jobs_from_before_link_columns_get_them_on_next_export(fake, sf, t
         assert report["ok"]
         ws = load_workbook(j.output_path)["Streamers"]
     assert ws["E1"].value == "twitch_id_link" and ws["E2"].value == "https://www.twitch.tv/starwraith"
+
+
+async def test_filled_in_row_untouched_except_highlight_and_old_remark(fake, sf, tmp_path):
+    from openpyxl.styles import PatternFill
+
+    build_twitch_world(fake)
+    headers = ["id_twitch", "country", "id_kick", "remarks", "twitch_id_link", "kick_id_link"]
+    path = make_workbook(
+        tmp_path / "filled.xlsx",
+        headers,
+        [
+            ["kosstochka", "Italy", "kosstochka", "nearest possible kick channel", "tw-link", "kick-link"],
+            ["starwraith", "Spain", None, "nearest possible kick channel", None, None],
+        ],
+    )
+    wb = load_workbook(path)
+    wb["Streamers"]["C2"].fill = PatternFill("solid", fgColor="FFFFEB9C")
+    wb.save(path)
+    job = await run(sf, path, "twitch")
+    assert job.verification_json["ok"], job.verification_json
+    ws = load_workbook(job.output_path)["Streamers"]
+    # filled-in row: ID and links untouched, yellow highlight and old "nearest" remark removed
+    assert [ws.cell(row=2, column=c).value for c in (3, 5, 6)] == ["kosstochka", "tw-link", "kick-link"]
+    assert ws["C2"].fill.fill_type is None and ws["D2"].value is None
+    # normal row: matched by the rules, remark cleared
+    assert ws["C3"].value == "starwraith" and ws["D3"].value is None

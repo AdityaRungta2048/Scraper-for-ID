@@ -113,3 +113,27 @@ def test_corrupt_image_does_not_crash():
     buf = io.BytesIO()
     img.save(buf, "PNG")
     assert compute_features(buf.getvalue())["low_complexity"] is True
+
+
+def _avatar(bg, character):
+    from PIL import ImageDraw
+
+    im = Image.new("RGB", (300, 300), bg)
+    d = ImageDraw.Draw(im)
+    if character == "face":
+        d.ellipse((90, 60, 210, 180), fill=(240, 200, 160))
+        d.rectangle((70, 180, 230, 300), fill=(30, 30, 30))
+        d.ellipse((120, 100, 140, 120), fill=(0, 0, 0))
+        d.ellipse((160, 100, 180, 120), fill=(0, 0, 0))
+    else:
+        d.polygon([(150, 40), (260, 260), (40, 260)], fill=(250, 250, 0))
+        d.rectangle((130, 150, 170, 250), fill=(200, 0, 0))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return compute_features(buf.getvalue())
+
+
+def test_same_character_on_a_different_background_colour_is_the_same_picture():
+    threshold = ScoringConfig().image_similarity_threshold
+    assert hash_similarity(_avatar((20, 60, 200), "face"), _avatar((220, 40, 40), "face")) >= threshold
+    assert hash_similarity(_avatar((20, 60, 200), "face"), _avatar((20, 60, 200), "other")) < 0.8

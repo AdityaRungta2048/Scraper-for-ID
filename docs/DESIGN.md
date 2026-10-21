@@ -158,35 +158,38 @@ NO_MATCH | REVIEW`, or `API_ERROR | RATE_LIMITED | TEMPORARY_ERROR |
 PROCESSING_ERROR` (retryable, never written as a remark), `SKIPPED_EMPTY`,
 `PRESERVED`.
 
+Matching rules (applied last, `apply_match_rules`): source exists -> a candidate is the
+same creator only with the exact same channel name (separators `_ - .` equal), the same
+profile picture (STRONG image signal: border-trimmed, centre-cropped and outline hashes, so a
+different background colour does not matter; generic images excluded) or exactly the same
+bio; source missing -> a same-name target account is the match. No REVIEW/"nearest" output.
+
 Destination ID: written only when the (final, after manual review) decision is MATCH —
-case A (source exists) or C (source missing, target verified by a back-link or a human).
+case A (source exists) or C (source missing, same-name target account).
 
 Remarks mirror the channel-link columns (a later product decision replacing the original
 per-case remark table), for both source platforms:
 
-| Kick link present | Twitch link present | remarks |
+| Source link present | Other platform link present | remarks |
 |---|---|---|
-| yes | yes, confirmed match | *(empty)* |
-| yes | yes, closest Twitch account only (Kick source) | `nearest possible twitch channel` |
-| yes, closest Kick account only (Twitch source) | yes | `nearest possible kick channel` |
-| yes | no | `no twitch id found` |
-| no | yes | `no kick id` |
+| yes | yes (match) | *(empty)* |
+| yes | no | `no twitch id found` (Kick source) / `no kick id` (Twitch source) |
+| no | yes (same-name match) | `no <source> channel found` |
 | no | no | `no Id on both platforms` |
 
 A platform "has a link" when, for the source platform, the source account exists; for the
-other platform, there is a match, a review candidate or any candidate not rejected in
-review. Errors never touch the workbook.
+other platform, there is a match. Errors never touch the workbook.
 
 Other rules:
 * Empty source cell → row untouched (`SKIPPED_EMPTY`).
 * Destination cell already filled in the upload → **preserved** by default
-  (`EXISTING_DESTINATION_POLICY=preserve`); the row is still verified and any
-  disagreement is reported in the review report. `overwrite` is available.
+  (`EXISTING_DESTINATION_POLICY=preserve`): links untouched; only an old
+  `nearest possible … channel` remark and the yellow suggestion fill are removed. The row is
+  still verified and any disagreement is reported in the review report. `overwrite` is available.
 * A pre-existing remark that is not one of the two app phrases is never erased.
 * Two informational columns, `twitch_id_link` and `kick_id_link`, are appended after the
-  last used column (or reused if present), one URL each: the source channel, and the best
-  other-platform account (confirmed match > review candidate > closest candidate). They
-  never influence the ID or remarks columns.
+  last used column (or reused if present), one URL each: the source channel, and the
+  matched other-platform account (empty without a match).
 * Nothing else in the workbook is modified; output is `<stem>_processed.xlsx`.
 
 ## H. How row order is guaranteed

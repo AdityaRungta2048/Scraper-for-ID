@@ -14,16 +14,27 @@ from app.models.tables import RowStatus
 REMARK_NO_KICK = "no kick id"
 REMARK_NO_TWITCH = "no twitch id found"
 REMARK_NO_BOTH = "no Id on both platforms"
-REMARK_NEAREST_TWITCH = "nearest possible twitch channel"
-REMARK_NEAREST_KICK = "nearest possible kick channel"
-REMARK_NEAREST = {"twitch": REMARK_NEAREST_TWITCH, "kick": REMARK_NEAREST_KICK}
+REMARK_MISSING = {"kick": REMARK_NO_KICK, "twitch": REMARK_NO_TWITCH}
+
+
+def remark_source_missing(source_platform: str) -> str:
+    """Only the other platform has the channel (the source account does not exist)."""
+    return f"no {source_platform} channel found"
+
+
+# written by earlier versions; removed from every row (also rows whose ID was already filled in)
+OLD_NEAREST_REMARKS = {
+    "nearest possible twitch channel",
+    "nearest possible kick channel",
+    "nearest possible channel",
+}
 APP_REMARKS = {
     REMARK_NO_KICK,
     REMARK_NO_TWITCH,
     REMARK_NO_BOTH,
-    REMARK_NEAREST_TWITCH,
-    REMARK_NEAREST_KICK,
-    "nearest possible channel",  # wording used briefly by an earlier version
+    remark_source_missing("kick"),
+    remark_source_missing("twitch"),
+    *OLD_NEAREST_REMARKS,
 }
 EMPTY_PLACEHOLDERS = {"", "none", "null", "nan", "n/a", "na", "-", "--", "unknown", "not found"}
 
@@ -66,33 +77,29 @@ _TABLE: dict[tuple[str, str, str, str | None], tuple[str, bool]] = {
 def link_presence(source_platform: str, resolution: dict[str, Any]) -> dict[str, bool]:
     """Which platforms get a channel link (same rule as the link columns).
 
-    Source platform: the source account exists. Other platform: there is a best account
-    to link — the match, the review candidate, or any candidate not rejected in review.
+    Source platform: the source account exists. Other platform: only a matched account.
     """
     target = "twitch" if source_platform == "kick" else "kick"
-    has_target = bool(resolution.get("matched_id") or resolution.get("review_candidate")) or any(
-        c.get("username") and c.get("manual_verdict") != "REJECTED"
-        for c in resolution.get("candidates") or []
-    )
-    return {source_platform: resolution.get("source_status") == "EXISTS", target: has_target}
+    return {
+        source_platform: resolution.get("source_status") == "EXISTS",
+        target: bool(resolution.get("matched_id")),
+    }
 
 
-def remark_for_links(
-    links: dict[str, bool], confirmed_match: bool = False, nearest_platform: str = "twitch"
-) -> str | None:
-    """Remarks mirror the link columns: never say "no kick id" when a Kick link is given.
+def remark_for_links(links: dict[str, bool], source_platform: str = "twitch") -> str | None:
+    """Remarks mirror the link columns.
 
-    Both links present: empty for a confirmed match; otherwise the ``nearest_platform`` link
-    (the platform being searched) is only the closest account found ->
-    "nearest possible twitch channel" / "nearest possible kick channel".
+    both channels -> empty; only the source channel -> "no <target> id"; only the other
+    platform's channel -> "no <source> channel found"; neither -> "no Id on both platforms".
     """
-    has_kick, has_twitch = links.get("kick", False), links.get("twitch", False)
-    if has_kick and has_twitch:
-        return None if confirmed_match else REMARK_NEAREST[nearest_platform]
-    if has_kick:
-        return REMARK_NO_TWITCH
-    if has_twitch:
-        return REMARK_NO_KICK
+    target = "twitch" if source_platform == "kick" else "kick"
+    has_source, has_target = links.get(source_platform, False), links.get(target, False)
+    if has_source and has_target:
+        return None
+    if has_source:
+        return REMARK_MISSING[target]
+    if has_target:
+        return remark_source_missing(source_platform)
     return REMARK_NO_BOTH
 
 
@@ -114,10 +121,7 @@ def transition(
     if key not in _TABLE:
         raise StateMachineError(f"undefined state {key}")
     case, write_id = _TABLE[key]
-    target = "twitch" if source_platform == "kick" else "kick"
-    remark = remark_for_links(
-        link_presence(source_platform, resolution), confirmed_match=write_id, nearest_platform=target
-    )
+    remark = remark_for_links(link_presence(source_platform, resolution), source_platform)
 
     matched = resolution.get("matched_id")
     if write_id and not matched:
@@ -134,7 +138,8 @@ def transition(
     # Existing destination values in the upload are user data.
     if not is_blank(existing_destination):
         if policy == "preserve":
-            return RowOutcome(RowStatus.PRESERVED, None, None, False, False, case + "_PRESERVED")
+            clear_old = str(existing_remarks or "").strip() in OLD_NEAREST_REMARKS
+            return RowOutcome(RowStatus.PRESERVED, None, None, False, clear_old, case + "_PRESERVED")
         # overwrite policy: replace only with a verified id; never erase user data on no-match
         write_dest = destination is not None
     else:

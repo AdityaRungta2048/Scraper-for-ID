@@ -17,7 +17,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-from app.excel.exporter import first_url, link_cells
+from app.excel.exporter import first_url, link_cells, stale_highlights
 from app.excel.importer import ColumnMap, cell_text
 
 
@@ -59,14 +59,15 @@ def _link(cell: Any) -> str | None:
     return h.target if h is not None else None
 
 
-def _style_sig(cell: Any) -> tuple[Any, ...]:
-    if not getattr(cell, "has_style", False):
+def _style_sig(cell: Any, with_fill: bool = True) -> tuple[Any, ...]:
+    # without the fill, always compare the parts: a cell whose only style was its fill has none left
+    if with_fill and not getattr(cell, "has_style", False):
         return ()
     # openpyxl StyleProxy objects do not compare equal across workbooks; compare their serialisation
     return (
         cell.number_format,
         repr(cell.font),
-        repr(cell.fill),
+        repr(cell.fill) if with_fill else None,
         repr(cell.border),
         repr(cell.alignment),
         repr(cell.protection),
@@ -148,6 +149,12 @@ def verify_output(
         diffs = 0
         link_diffs = 0
         links = link_cells(columns)
+        # filled-in IDs that carried the yellow suggestion highlight: only the fill is removed
+        unhighlighted = (
+            stale_highlights(o_ws, columns.dest_col(source_platform), columns.header_row)
+            if is_target
+            else set()
+        )
         for r in range(1, exp_rows + 1):
             for c in range(1, exp_cols + 1):
                 o_cell, n_cell = o_ws.cell(row=r, column=c), n_ws.cell(row=r, column=c)
@@ -172,7 +179,13 @@ def verify_output(
                     rep.mismatches.append(
                         f"{name}!{n_cell.coordinate}: hyperlink {_link(n_cell)!r}, {what_link}"
                     )
-                if not (is_target and (r, c) in expected and not o_cell.has_style) and _style_sig(
+                if (r, c) in unhighlighted:
+                    if n_cell.fill.fill_type is not None or _style_sig(o_cell, False) != _style_sig(
+                        n_cell, False
+                    ):
+                        diffs += 1
+                        rep.mismatches.append(f"{name}!{n_cell.coordinate}: highlight not removed cleanly")
+                elif not (is_target and (r, c) in expected and not o_cell.has_style) and _style_sig(
                     o_cell
                 ) != _style_sig(n_cell):
                     diffs += 1
