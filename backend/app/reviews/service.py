@@ -97,6 +97,7 @@ def submit_verdict(
     target_platform = candidates[target]["platform"]
     mr = session.execute(
         select(ManualReview).where(
+            ManualReview.job_id == job.id,
             ManualReview.source_platform == source_platform,
             ManualReview.source_key == key,
             ManualReview.target_platform == target_platform,
@@ -118,7 +119,7 @@ def submit_verdict(
     mr.target_display = candidates[target].get("display_name")
     session.flush()
 
-    all_verdicts = manual_verdicts(session, source_platform)
+    all_verdicts = manual_verdicts(session, job.id, source_platform)
     affected = session.execute(select(ProcessingRow).where(ProcessingRow.job_id == job.id)).scalars()
     updated = []
     for r in affected:

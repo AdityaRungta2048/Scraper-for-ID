@@ -91,7 +91,7 @@ async def process_job(
                 .order_by(ProcessingRow.original_row)
             ).all()
         )
-        verdicts = manual_verdicts(s, platform)
+        verdicts = manual_verdicts(s, job_id, platform)
         s.commit()
 
     # Group rows by the identity that will be resolved (duplicates resolved once).

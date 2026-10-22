@@ -266,12 +266,18 @@ class MatchDecision(Base):
 
 
 class ManualReview(Base):
-    """Human verdict on a (source, target) pair. Used as an explicit override, never to retune."""
+    """Human verdict on a (source, target) pair in ONE job. An explicit override for that job
+    only (never carried into later runs), never used to retune."""
 
     __tablename__ = "manual_reviews"
     __table_args__ = (
         UniqueConstraint(
-            "source_platform", "source_key", "target_platform", "target_key", name="uq_manual_review_pair"
+            "job_id",
+            "source_platform",
+            "source_key",
+            "target_platform",
+            "target_key",
+            name="uq_manual_review_pair",
         ),
     )
 

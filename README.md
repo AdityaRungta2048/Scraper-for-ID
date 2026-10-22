@@ -137,7 +137,7 @@ All settings live in `.env` (template: [`.env.example`](.env.example)). Key grou
 | Infrastructure | `DATABASE_URL`, `REDIS_URL`, `QUEUE_BACKEND` (`inline`/`rq`), `DATA_DIR`, `MAX_UPLOAD_MB`, `CORS_ORIGINS`, `LOG_LEVEL`, `LOG_JSON` |
 | Behaviour | `EXISTING_DESTINATION_POLICY` (`preserve`/`overwrite`), `KICK_PUBLIC_PROFILE_ENRICHMENT`, `SEARCH_ENGINE_FALLBACK` |
 | HTTP | `API_CONCURRENCY`, `ROW_CONCURRENCY`, `TWITCH_REQUESTS_PER_MINUTE`, `KICK_REQUESTS_PER_MINUTE`, `RETRY_COUNT`, `RETRY_BASE_DELAY`, `HTTP_TIMEOUT` |
-| Cache | `CACHE_TTL`, `NEGATIVE_CACHE_TTL`, `RESOLUTION_CACHE_TTL`, `IMAGE_CACHE_TTL` |
+| In-run cache (memory only, never kept after the run) | `CACHE_TTL`, `NEGATIVE_CACHE_TTL`, `RESOLUTION_CACHE_TTL` |
 | Candidates | `MAX_CANDIDATES`, `SEARCH_RESULTS_PER_QUERY`, `IMAGE_MAX_CANDIDATES` |
 | Scoring | `MATCH_THRESHOLD`, `REVIEW_THRESHOLD`, `CONFIDENCE_SCALE`, `CROSS_LINK_WEIGHT`, `SOCIAL_LINK_WEIGHT`, `IMAGE_WEIGHT`, `USERNAME_WEIGHT`, `DISPLAY_NAME_WEIGHT`, `BIO_WEIGHT`, `CONTENT_WEIGHT`, `COUNTRY_WEIGHT`, `IMAGE_SIMILARITY_THRESHOLD`, … (see `backend/app/config.py`) |
 
@@ -324,7 +324,7 @@ social links, URLs), the evidence scores, each signal with its points and explan
 * **Confirm Match** writes the candidate's ID into the processed workbook (for every row with the
   same source ID), **Reject Match** stores a negative decision, **Skip** leaves it for later.
 * Only accounts the engine actually discovered can be confirmed — you can't type an arbitrary ID.
-* Verdicts are stored in `manual_reviews` and applied as explicit overrides in future jobs too.
+* Verdicts are stored in `manual_reviews` for that job only; a new upload never reuses them.
   They never change weights or thresholds (no self-modifying learning).
 * After reviewing, **Download** regenerates and re-verifies the workbook automatically.
 
@@ -352,8 +352,10 @@ Verified against the official documentation (see `docs/DESIGN.md` §A/§B):
   `Retry-After` support, no retry on 400/409/422, one token refresh on 401, clear configuration
   error on repeated 401/403. Persistent failures mark rows `API_ERROR` / `RATE_LIMITED` /
   `TEMPORARY_ERROR` — never "no match" — and **Retry Failed Rows** re-runs only those.
-* Caching (DB + memory): profiles 24 h, negative lookups 6 h, image hashes 7 d, whole resolutions
-  3 d (keyed by engine version). Duplicate IDs in a workbook are resolved once.
+* **Every run starts fresh.** Nothing from an earlier run is reused: profiles, lookups, picture
+  hashes and review decisions are kept in memory for the current run only and never saved, so a
+  profile changed on a platform since the last run is always read again. Within one run,
+  duplicate IDs in a workbook are looked up once.
 
 ## 18. Security
 

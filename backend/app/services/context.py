@@ -12,12 +12,12 @@ from app.config import Settings
 from app.logging_setup import get_logger
 from app.matching.candidates import CandidateGenerator
 from app.matching.config import ScoringConfig
-from app.matching.image import ProfileImageMatcher
+from app.matching.image import InMemoryFeatureStore, ProfileImageMatcher
 from app.matching.text import SentenceTransformerEmbedder, TextEmbedder
 from app.matching.verifier import IdentityVerifier
 from app.platforms.registry import PlatformBundle, build_platforms
 from app.services.resolver import IdentityResolver
-from app.services.stores import DbImageFeatureStore, ProfileStore
+from app.services.stores import ProfileStore
 
 log = get_logger("context")
 
@@ -46,10 +46,12 @@ def build_context(
     session_factory: sessionmaker[Session],
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> MatchingContext:
-    cache = CacheService(session_factory)
+    # Every run starts fresh: lookups are kept in memory for THIS run only (duplicate ids in one
+    # sheet are looked up once) and never saved or reused by a later run.
+    cache = CacheService(None)
     platforms = build_platforms(settings, cache, transport=transport or _default_transport)
     config = ScoringConfig.from_settings(settings)
-    profile_store = ProfileStore(session_factory)
+    profile_store = ProfileStore()
     embedder: TextEmbedder | None = None
     if settings.bio_embeddings_enabled:
         try:
@@ -58,9 +60,7 @@ def build_context(
             log.warning("bio_embeddings_unavailable", error=type(exc).__name__)
     verifier = IdentityVerifier(
         config,
-        image_matcher=ProfileImageMatcher(
-            config, DbImageFeatureStore(session_factory, settings.image_cache_ttl)
-        ),
+        image_matcher=ProfileImageMatcher(config, InMemoryFeatureStore()),
         social_frequency=profile_store.social_frequency,
         text_embedder=embedder,
         image_max_candidates=settings.image_max_candidates,

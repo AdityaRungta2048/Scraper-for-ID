@@ -280,3 +280,18 @@ async def test_filled_in_row_untouched_except_highlight_and_old_remark(fake, sf,
     assert ws["C2"].fill.fill_type is None and ws["D2"].value is None
     # normal row: matched by the rules, remark cleared
     assert ws["C3"].value == "starwraith" and ws["D3"].value is None
+
+
+async def test_every_run_starts_fresh(fake, sf, tmp_path):
+    from tests.scenarios import img, img_v
+
+    fake.add_kick("freshguy", image=img(60))
+    path = make_workbook(tmp_path / "fresh.xlsx", KICK_HEADERS, [["freshguy", "France", None, None]])
+    first = await run(sf, path)
+    assert load_workbook(first.output_path)["Streamers"]["C2"].value is None  # no Twitch channel yet
+    # the creator opens a Twitch channel after the first run: the next run must see it
+    fake.add_twitch("freshguy", "FreshGuy", image=img_v(60))
+    second = await run(
+        sf, make_workbook(tmp_path / "again.xlsx", KICK_HEADERS, [["freshguy", "France", None, None]])
+    )
+    assert load_workbook(second.output_path)["Streamers"]["C2"].value == "FreshGuy"

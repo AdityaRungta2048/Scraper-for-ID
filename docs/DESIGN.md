@@ -90,7 +90,7 @@ Next.js UI ──► FastAPI ──► jobs/rows tables ──► queue (RQ+Redi
 
 ## D. Candidate generation strategy
 
-Per unique source id (duplicates resolved once per job and cached across jobs):
+Per unique source id (duplicates resolved once per job; nothing is reused across jobs):
 
 1. **Exact** lookup of the source account (existence check).
 2. **Explicit links**: target-platform URLs/handles found in the source profile

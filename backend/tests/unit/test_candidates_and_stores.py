@@ -13,7 +13,7 @@ from app.platforms.http import ClientCredentialsToken, PlatformHttpClient, Retry
 from app.platforms.kick import KickAdapter
 from app.platforms.search_engine import handle_from_url
 from app.platforms.twitch import TwitchAdapter
-from app.services.stores import DbImageFeatureStore, ProfileStore
+from app.services.stores import ProfileStore
 from tests.excel_helpers import KICK_HEADERS, make_workbook
 from tests.fakes import FakePlatforms
 
@@ -99,27 +99,17 @@ async def test_kick_has_no_search_so_generator_only_probes():
     assert fake.calls["api.kick.com/public/v1/channels"] == 1  # all variants in ONE batched request
 
 
-def test_social_frequency_from_db(sf):
-    store = ProfileStore(sf)
+def test_social_frequency_counts_accounts_seen_in_this_run():
+    store = ProfileStore()
     for i in range(4):
         p = Profile("twitch", f"member{i}", description="instagram.com/bigteam")
         store.upsert(p, extract_identities(p))
     assert store.social_frequency("instagram", "bigteam", {("twitch", "member0")}) == 3
     assert store.social_frequency("instagram", "nobody", set()) == 0
-
-
-def test_db_image_store_counts_distinct_accounts(sf):
-    store = DbImageFeatureStore(sf)
-    feats = {
-        "sha256": "x",
-        "variants": {"full": {"p": "ff00ff00ff00ff00", "d": "0", "a": "0"}},
-        "low_complexity": False,
-    }
-    store.put("https://a/1", "kick", "a", feats, None)
-    store.put("https://a/2", "kick", "a", feats, None)  # same account, new URL
-    store.put("https://b/1", "twitch", "b", feats, None)
-    assert store.accounts_sharing_hash("ff00ff00ff00ff00", set()) == 2
-    assert store.get("https://a/1") == feats
+    # a profile that dropped the link no longer counts
+    gone = Profile("twitch", "member1", description="new bio")
+    store.upsert(gone, extract_identities(gone))
+    assert store.social_frequency("instagram", "bigteam", set()) == 3
 
 
 def test_verifier_detects_formatting_change(tmp_path):
